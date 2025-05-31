@@ -1,0 +1,1 @@
+`elm make elm-src/Main.elm --output assets/elm.js`

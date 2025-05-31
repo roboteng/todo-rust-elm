@@ -1,16 +1,19 @@
+use std::path::PathBuf;
+
 use axum::{
     Json, Router,
     http::StatusCode,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-
+use tower_http::services::ServeDir;
 #[tokio::main]
 async fn main() {
-    // build our application with a route
+    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+
     let app = Router::new()
-        // `GET /` goes to `root`
-        .route("/", get(root))
+        .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
+        .route("/root", get(root))
         // `POST /users` goes to `create_user`
         .route("/users", post(create_user));
 
