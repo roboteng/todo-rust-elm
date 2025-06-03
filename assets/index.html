@@ -18,12 +18,11 @@
       node: document.getElementById('myapp')
     });
     app.ports.sendMessage.subscribe((msg) => {
-      console.log(msg);
-      invoke(msg.action, msg.args)
-        .then(m => {
-          app.ports.recvMessage.send({ action: msg.action, payload: m });
-        })
-        .catch(console.error);
+      socket.send(msg)
+      //.then() // Should we do anything with the response?
+    })
+    socket.addEventListener('message', (msg) => {
+      app.ports.recvMessage.send(JSON.parse(msg.data))
     })
   </script>
 </body>

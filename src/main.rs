@@ -19,11 +19,15 @@
 use axum::{
     Router,
     body::Bytes,
-    extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
+    extract::{
+        FromRef,
+        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
+    },
     response::IntoResponse,
     routing::any,
 };
 use axum_extra::{TypedHeader, headers};
+use serde::{Deserialize, Serialize};
 
 use std::ops::ControlFlow;
 use std::{net::SocketAddr, path::PathBuf};
@@ -129,53 +133,24 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         }
     }
 
-    // Since each client gets individual statemachine, we can pause handling
-    // when necessary to wait for some external event (in this case illustrated by sleeping).
-    // Waiting for this client to finish getting its greetings does not prevent other clients from
-    // connecting to server and receiving their greetings.
-    for i in 1..5 {
-        if socket
-            .send(Message::Text(format!("Hi {i} times!").into()))
-            .await
-            .is_err()
-        {
-            println!("client {who} abruptly disconnected");
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
     let (mut sender, mut receiver) = socket.split();
 
     // Spawn a task that will push several messages to the client (does not matter what client does)
     let mut send_task = tokio::spawn(async move {
-        let n_msg = 20;
-        for i in 0..n_msg {
-            // In case of any websocket error, we exit.
-            if sender
-                .send(Message::Text(format!("Server message {i} ...").into()))
-                .await
-                .is_err()
-            {
-                return i;
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        }
-
-        println!("Sending close to {who}...");
-        if let Err(e) = sender
-            .send(Message::Close(Some(CloseFrame {
-                code: axum::extract::ws::close_code::NORMAL,
-                reason: Utf8Bytes::from_static("Goodbye"),
-            })))
+        sender
+            .send(Message::Text(
+                serde_json::to_string(&Greeting {
+                    action: "greet".to_string(),
+                    payload: "bar".to_string(),
+                })
+                .unwrap()
+                .into(),
+            ))
             .await
-        {
-            println!("Could not send Close due to {e}, probably it is ok?");
-        }
-        n_msg
+            .unwrap();
+        0
     });
 
     // This second task will receive messages from client and print them on server console
@@ -211,6 +186,12 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
 
     // returning from the handler closes the websocket connection
     println!("Websocket context {who} destroyed");
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Greeting {
+    action: String,
+    payload: String,
 }
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
