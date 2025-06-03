@@ -18,7 +18,7 @@
       node: document.getElementById('myapp')
     });
     app.ports.sendMessage.subscribe((msg) => {
-      socket.send(msg)
+      socket.send(JSON.stringify(msg))
       //.then() // Should we do anything with the response?
     })
     socket.addEventListener('message', (msg) => {

@@ -29,8 +29,8 @@ use axum::{
 use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
 
-use std::ops::ControlFlow;
 use std::{net::SocketAddr, path::PathBuf};
+use std::{ops::ControlFlow, time::Duration};
 use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
@@ -104,20 +104,6 @@ async fn ws_handler(
 
 /// Actual websocket statemachine (one will be spawned per connection)
 async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
-    // send a ping (unsupported by some browsers) just to kick things off and get a response
-    if socket
-        .send(Message::Ping(Bytes::from_static(&[1, 2, 3])))
-        .await
-        .is_ok()
-    {
-        println!("Pinged {who}...");
-    } else {
-        println!("Could not send ping {who}!");
-        // no Error here since the only thing we can do is to close the connection.
-        // If we can not send messages, there is no way to salvage the statemachine anyway.
-        return;
-    }
-
     // receive single message from a client (we can either receive or send with socket).
     // this will likely be the Pong for our Ping or a hello message from client.
     // waiting for message from a client will block this task, but will not block other client's
@@ -139,18 +125,15 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
 
     // Spawn a task that will push several messages to the client (does not matter what client does)
     let mut send_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(30)).await;
         sender
             .send(Message::Text(
-                serde_json::to_string(&Greeting {
-                    action: "greet".to_string(),
-                    payload: "bar".to_string(),
-                })
-                .unwrap()
-                .into(),
+                serde_json::to_string(&Msg::Greet("bar".into()))
+                    .unwrap()
+                    .into(),
             ))
             .await
             .unwrap();
-        0
     });
 
     // This second task will receive messages from client and print them on server console
@@ -170,8 +153,8 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     tokio::select! {
         rv_a = (&mut send_task) => {
             match rv_a {
-                Ok(a) => println!("{a} messages sent to {who}"),
-                Err(a) => println!("Error sending messages {a:?}")
+                Ok(_) => println!("messages sent to {who}"),
+                Err(e) => println!("Error sending messages {e:?}")
             }
             recv_task.abort();
         },
@@ -188,17 +171,26 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     println!("Websocket context {who} destroyed");
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Greeting {
-    action: String,
-    payload: String,
+#[derive(Debug, Serialize)]
+#[serde(tag = "action", content = "payload", rename_all = "snake_case")]
+enum Msg {
+    Greet(String),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", content = "payload", rename_all = "snake_case")]
+enum InMsg {
+    StartScanning,
 }
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
 fn process_message(msg: Message, who: SocketAddr) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
+            let k = serde_json::from_str::<InMsg>(t.as_str());
+
             println!(">>> {who} sent str: {t:?}");
+            let _ = dbg!(k);
         }
         Message::Binary(d) => {
             println!(">>> {who} sent {} bytes: {d:?}", d.len());
