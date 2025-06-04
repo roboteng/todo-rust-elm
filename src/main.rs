@@ -18,11 +18,7 @@
 
 use axum::{
     Router,
-    body::Bytes,
-    extract::{
-        FromRef,
-        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-    },
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,
     routing::any,
 };
@@ -31,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use std::{ops::ControlFlow, time::Duration};
+use std::ops::ControlFlow;
 use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
@@ -41,7 +37,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
-use axum::extract::ws::CloseFrame;
 
 //allows to split the websocket stream into separate TX and RX branches
 use futures_util::{
@@ -107,7 +102,7 @@ async fn ws_handler(
 }
 
 /// Actual websocket statemachine (one will be spawned per connection)
-async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
+async fn handle_socket(socket: WebSocket, who: SocketAddr) {
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
     let (sender, mut receiver) = socket.split();
