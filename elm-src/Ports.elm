@@ -16,7 +16,7 @@ sendGreet s =
     sendMessage
         (object
             [ ( "action", string "greet" )
-            , ( "payload", object [ ( "name", string s ) ] )
+            , ( "payload", string s )
             ]
         )
 

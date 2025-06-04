@@ -121,7 +121,7 @@ view model =
     { title = "Application Title"
     , body =
         [ div []
-            [ text "Tauri Application"
+            [ text "Web Application"
             , text model.name
             , button [ onClick (SendGreet "Me") ] [ text "click" ]
             , text (Maybe.withDefault "" model.error)

@@ -26,8 +26,8 @@ use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use std::ops::ControlFlow;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
@@ -136,28 +136,33 @@ enum OutMsg {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum InMsg {
-    Greet { name: String },
+    Greet(String),
     StartScanning,
 }
+
+type Shared<T> = Arc<Mutex<T>>;
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
 fn process_message(
     msg: Message,
     who: SocketAddr,
-    sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
+    sender: Shared<SplitSink<WebSocket, Message>>,
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
             let k = serde_json::from_str::<InMsg>(t.as_str());
 
             match k {
-                Ok(InMsg::Greet { name: s }) => {
+                Ok(InMsg::Greet(s)) => {
+                    let name = s.clone();
                     tokio::spawn(async move {
                         let mut send = sender.lock().await;
                         send.send(Message::Text(
-                            serde_json::to_string(&OutMsg::Greet("bar".into()))
-                                .unwrap()
-                                .into(),
+                            serde_json::to_string(&OutMsg::Greet(format!(
+                                "Hello, {name}!, You've been greeted from the other side"
+                            )))
+                            .unwrap()
+                            .into(),
                         ))
                         .await
                         .unwrap();

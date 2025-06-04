@@ -26,9 +26,9 @@
       console.log(`recv'ed ${typeof data}`, data);
       app.ports.recvMessage.send(data)
     })
-    // socket.addEventListener('open', () => { })
-    // socket.addEventListener('close', () => { })
-    // socket.addEventListener('error', () => { })
+    socket.addEventListener('open', (e) => console.log("open", e))
+    socket.addEventListener('close', (e) => console.log("close", e))
+    socket.addEventListener('error', () => console.warn("error", e))
   </script>
 </body>
 
