@@ -28,8 +28,9 @@ use axum::{
 };
 use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use std::{ops::ControlFlow, time::Duration};
 use tower_http::{
     services::ServeDir,
@@ -43,7 +44,10 @@ use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::CloseFrame;
 
 //allows to split the websocket stream into separate TX and RX branches
-use futures_util::{sink::SinkExt, stream::StreamExt};
+use futures_util::{
+    sink::SinkExt,
+    stream::{SplitSink, StreamExt},
+};
 
 #[tokio::main]
 async fn main() {
@@ -104,68 +108,25 @@ async fn ws_handler(
 
 /// Actual websocket statemachine (one will be spawned per connection)
 async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
-    // receive single message from a client (we can either receive or send with socket).
-    // this will likely be the Pong for our Ping or a hello message from client.
-    // waiting for message from a client will block this task, but will not block other client's
-    // connections.
-    if let Some(msg) = socket.recv().await {
-        if let Ok(msg) = msg {
-            if process_message(msg, who).is_break() {
-                return;
-            }
-        } else {
-            println!("client {who} abruptly disconnected");
-            return;
-        }
-    }
-
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
-    let (mut sender, mut receiver) = socket.split();
-
-    // Spawn a task that will push several messages to the client (does not matter what client does)
-    let mut send_task = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        sender
-            .send(Message::Text(
-                serde_json::to_string(&Msg::Greet("bar".into()))
-                    .unwrap()
-                    .into(),
-            ))
-            .await
-            .unwrap();
-    });
+    let (sender, mut receiver) = socket.split();
+    let sender = Arc::new(Mutex::new(sender));
 
     // This second task will receive messages from client and print them on server console
-    let mut recv_task = tokio::spawn(async move {
+    let recv_task = tokio::spawn(async move {
         let mut cnt = 0;
         while let Some(Ok(msg)) = receiver.next().await {
             cnt += 1;
             // print message and break if instructed to do so
-            if process_message(msg, who).is_break() {
+            if process_message(msg, who, sender.clone()).is_break() {
                 break;
             }
         }
         cnt
     });
 
-    // If any one of the tasks exit, abort the other.
-    tokio::select! {
-        rv_a = (&mut send_task) => {
-            match rv_a {
-                Ok(_) => println!("messages sent to {who}"),
-                Err(e) => println!("Error sending messages {e:?}")
-            }
-            recv_task.abort();
-        },
-        rv_b = (&mut recv_task) => {
-            match rv_b {
-                Ok(b) => println!("Received {b} messages"),
-                Err(b) => println!("Error receiving messages {b:?}")
-            }
-            send_task.abort();
-        }
-    }
+    recv_task.await.unwrap();
 
     // returning from the handler closes the websocket connection
     println!("Websocket context {who} destroyed");
@@ -173,24 +134,46 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
-enum Msg {
+enum OutMsg {
     Greet(String),
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum InMsg {
+    Greet { name: String },
     StartScanning,
 }
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
-fn process_message(msg: Message, who: SocketAddr) -> ControlFlow<(), ()> {
+fn process_message(
+    msg: Message,
+    who: SocketAddr,
+    sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
+) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
             let k = serde_json::from_str::<InMsg>(t.as_str());
 
-            println!(">>> {who} sent str: {t:?}");
-            let _ = dbg!(k);
+            match k {
+                Ok(InMsg::Greet { name: s }) => {
+                    tokio::spawn(async move {
+                        let mut send = sender.lock().await;
+                        send.send(Message::Text(
+                            serde_json::to_string(&OutMsg::Greet("bar".into()))
+                                .unwrap()
+                                .into(),
+                        ))
+                        .await
+                        .unwrap();
+                    });
+                    tracing::info!("Got greet: {s}");
+                }
+                Ok(InMsg::StartScanning) => tracing::info!("Got start_scanning"),
+                Err(e) => {
+                    tracing::error!("Unhandled message: {e}");
+                }
+            }
         }
         Message::Binary(d) => {
             println!(">>> {who} sent {} bytes: {d:?}", d.len());

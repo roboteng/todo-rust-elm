@@ -15,15 +15,20 @@
   <script>
     const socket = new WebSocket("ws://localhost:3000/ws")
     var app = Elm.Main.init({
-      node: document.getElementById('myapp')
+      node: document.getElementById('app')
     });
     app.ports.sendMessage.subscribe((msg) => {
+      console.log(`sending ${typeof msg}`, msg)
       socket.send(JSON.stringify(msg))
-      //.then() // Should we do anything with the response?
     })
     socket.addEventListener('message', (msg) => {
-      app.ports.recvMessage.send(JSON.parse(msg.data))
+      const data = JSON.parse(msg.data);
+      console.log(`recv'ed ${typeof data}`, data);
+      app.ports.recvMessage.send(data)
     })
+    // socket.addEventListener('open', () => { })
+    // socket.addEventListener('close', () => { })
+    // socket.addEventListener('error', () => { })
   </script>
 </body>
 
