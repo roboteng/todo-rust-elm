@@ -1,46 +1,88 @@
-port module Ports exposing (recvAction, sendGreet, sendStartScanning)
+port module Ports exposing (IncomingMessage(..), OutgoingMessage(..), decodeIncomingMessage, encodeMessage, recvAction, sendGreet, sendMessage, sendStartScanning)
 
-import Dict exposing (Dict)
 import Json.Decode exposing (errorToString, field, map2)
-import Json.Encode exposing (Value, object, string)
+import Json.Encode exposing (Value, object)
 
 
-port sendMessage : Value -> Cmd msg
+port sendMessagePort : Value -> Cmd msg
 
 
 port recvMessage : (Value -> msg) -> Sub msg
 
 
+type OutgoingMessage
+    = Greet String
+    | StartScanning
+
+
+type IncomingMessage
+    = GreetReceived String
+    | ScanStarted
+
+
+sendMessage : OutgoingMessage -> Cmd msg
+sendMessage msg =
+    sendMessagePort <| encodeMessage msg
+
+
 sendGreet : String -> Cmd msg
 sendGreet s =
-    sendMessage
-        (object
-            [ ( "action", string "greet" )
-            , ( "payload", string s )
-            ]
-        )
+    sendMessage <| Greet s
 
 
+sendStartScanning : Cmd msg
 sendStartScanning =
-    sendMessage
-        (object
-            [ ( "action", string "start_scanning" )
-            ]
-        )
+    sendMessage StartScanning
 
 
-recvAction : Dict String (Value -> msg) -> (String -> msg) -> Sub msg
-recvAction onAction onError =
+encodeMessage : OutgoingMessage -> Value
+encodeMessage msg =
+    case msg of
+        Greet s ->
+            object
+                [ ( "action", Json.Encode.string "greet" )
+                , ( "payload", Json.Encode.string s )
+                ]
+
+        StartScanning ->
+            object
+                [ ( "action", Json.Encode.string "start_scanning" )
+                ]
+
+
+recvAction : (IncomingMessage -> msg) -> (String -> msg) -> Sub msg
+recvAction onMessage onError =
     recvMessage <|
         \value ->
-            case Json.Decode.decodeValue decodeAction value of
-                Ok action ->
-                    Dict.get action.action onAction
-                        |> Maybe.map (\a -> a action.payload)
-                        |> Maybe.withDefault (onError ("Unknown Command" ++ action.action))
+            case decodeIncomingMessage value of
+                Ok incomingMsg ->
+                    onMessage incomingMsg
 
-                Err e ->
-                    onError (errorToString e)
+                Err error ->
+                    onError error
+
+
+decodeIncomingMessage : Value -> Result String IncomingMessage
+decodeIncomingMessage value =
+    case Json.Decode.decodeValue decodeAction value of
+        Ok action ->
+            case action.action of
+                "greet" ->
+                    case Json.Decode.decodeValue Json.Decode.string action.payload of
+                        Ok s ->
+                            Ok (GreetReceived s)
+
+                        Err e ->
+                            Err ("Failed to decode greet payload: " ++ errorToString e)
+
+                "start_scanning" ->
+                    Ok ScanStarted
+
+                unknown ->
+                    Err ("Unknown action: " ++ unknown)
+
+        Err e ->
+            Err ("Failed to decode action: " ++ errorToString e)
 
 
 type alias Action =

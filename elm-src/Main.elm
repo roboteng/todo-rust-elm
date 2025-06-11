@@ -6,7 +6,7 @@ import Dict
 import Html exposing (..)
 import Html.Events exposing (onClick)
 import Json.Decode exposing (Value, errorToString)
-import Ports exposing (recvAction, sendGreet, sendStartScanning)
+import Ports exposing (IncomingMessage(..), OutgoingMessage(..), recvAction, sendMessage)
 import Url
 
 
@@ -23,19 +23,33 @@ main =
 
 
 type alias Model =
+    { navigation : NavigationModel
+    , messages : MessageModel
+    }
+
+
+type alias NavigationModel =
     { key : Nav.Key
     , url : Url.Url
-    , name : String
+    }
+
+
+type alias MessageModel =
+    { name : String
     , error : Maybe String
     }
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
-    ( { key = key
-      , url = url
-      , name = ""
-      , error = Nothing
+    ( { navigation =
+            { key = key
+            , url = url
+            }
+      , messages =
+            { name = ""
+            , error = Nothing
+            }
       }
     , Cmd.none
     )
@@ -45,10 +59,9 @@ type Msg
     = None
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
-    | SendGreet String
-    | RecvGreet String
-    | PortError String
-    | StartScanning
+    | SendMsg OutgoingMessage
+    | MessageReceived IncomingMessage
+    | MessageError String
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -60,60 +73,41 @@ update msg model =
         UrlRequested urlRequest ->
             case urlRequest of
                 Browser.Internal url ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+                    ( model, Nav.pushUrl model.navigation.key (Url.toString url) )
 
                 Browser.External href ->
                     ( model, Nav.load href )
 
         UrlChanged url ->
-            ( { model | url = url }
+            ( { model | navigation = { key = model.navigation.key, url = url } }
             , Cmd.none
             )
 
-        SendGreet s ->
-            ( model
-            , sendGreet s
-            )
+        SendMsg m ->
+            dispatchSendMsg model m
 
-        RecvGreet s ->
-            ( { model | name = s }
-            , Cmd.none
-            )
+        MessageReceived incomingMsg ->
+            case incomingMsg of
+                GreetReceived s ->
+                    ( { model | messages = { name = s, error = model.messages.error } }
+                    , Cmd.none
+                    )
 
-        StartScanning ->
-            ( model, sendStartScanning )
+                ScanStarted ->
+                    ( model, Cmd.none )
 
-        PortError e ->
-            ( { model | error = Just e }, Cmd.none )
+        MessageError e ->
+            ( { model | messages = { name = model.messages.name, error = Just e } }, Cmd.none )
+
+
+dispatchSendMsg : Model -> OutgoingMessage -> ( Model, Cmd Msg )
+dispatchSendMsg model msg =
+    ( model, sendMessage msg )
 
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    recvAction
-        (Dict.fromList
-            [ ( "greet"
-              , decodeGreet
-              )
-            , ( "start_scanning"
-              , decodeEmpty
-              )
-            ]
-        )
-        PortError
-
-
-decodeGreet : Value -> Msg
-decodeGreet v =
-    case Json.Decode.decodeValue Json.Decode.string v of
-        Ok g ->
-            RecvGreet g
-
-        Err e ->
-            PortError (errorToString e)
-
-
-decodeEmpty _ =
-    None
+    recvAction MessageReceived MessageError
 
 
 view : Model -> Browser.Document Msg
@@ -122,10 +116,10 @@ view model =
     , body =
         [ div []
             [ text "Web Application"
-            , text model.name
-            , button [ onClick (SendGreet "Me") ] [ text "click" ]
-            , text (Maybe.withDefault "" model.error)
+            , text model.messages.name
+            , button [ onClick <| SendMsg <| Greet "Me" ] [ text "click" ]
+            , text (Maybe.withDefault "" model.messages.error)
             ]
-        , button [ onClick StartScanning ] [ text "Start Scanning" ]
+        , button [ onClick <| SendMsg StartScanning ] [ text "Start Scanning" ]
         ]
     }
