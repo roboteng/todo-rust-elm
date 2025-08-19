@@ -1,0 +1,136 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Elm
+      uses: jorelali/setup-elm@v5
+      with:
+        elm-version: 0.19.1
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: clippy
+        override: true
+    
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache Elm dependencies  
+      uses: actions/cache@v3
+      with:
+        path: elm-stuff
+        key: ${{ runner.os }}-elm-${{ hashFiles('**/elm.json') }}
+    
+    - name: Build Elm
+      run: elm make elm-src/Main.elm --output assets/elm.js
+    
+    - name: Run Cargo tests
+      run: cargo test
+    
+    - name: Run Cargo clippy
+      run: cargo clippy -- -D warnings
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: deploy/package-lock.json
+    
+    - name: Setup Elm
+      uses: jorelali/setup-elm@v5
+      with:
+        elm-version: 0.19.1
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Install CDK dependencies
+      run: cd deploy && npm ci
+    
+    - name: Deploy infrastructure with CDK
+      run: cd deploy && npx cdk deploy --require-approval never
+    
+    - name: Build Elm for production
+      run: elm make elm-src/Main.elm --output assets/elm.js --optimize
+    
+    - name: Build Rust for production
+      run: cargo build --release
+    
+    - name: Get EC2 instance info
+      id: instance-info
+      run: |
+        INSTANCE_ID=$(cd deploy && npx cdk --output json list 2>/dev/null | jq -r '.[] | select(.name=="RustElmStack") | .outputs.InstanceId // empty')
+        if [ -z "$INSTANCE_ID" ]; then
+          INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name RustElmStack --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)
+        fi
+        PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+        echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+        echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+    
+    - name: Get deployment bucket name
+      id: bucket-info
+      run: |
+        BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name RustElmStack --query 'Stacks[0].Outputs[?OutputKey==`DeploymentBucket`].OutputValue' --output text)
+        echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+    
+    - name: Upload artifacts to S3
+      run: |
+        # Upload binary
+        aws s3 cp target/release/rust-elm s3://${{ steps.bucket-info.outputs.bucket_name }}/rust-elm
+        
+        # Upload assets
+        aws s3 sync assets/ s3://${{ steps.bucket-info.outputs.bucket_name }}/assets/
+    
+    - name: Deploy application to EC2
+      run: |
+        # Wait for instance to be ready
+        aws ec2 wait instance-status-ok --instance-ids ${{ steps.instance-info.outputs.instance_id }}
+        
+        # Run deployment script on EC2
+        aws ssm send-command \
+          --instance-ids ${{ steps.instance-info.outputs.instance_id }} \
+          --document-name "AWS-RunShellScript" \
+          --parameters 'commands=["/home/ec2-user/deploy.sh"]' \
+          --wait-for-completion
+        
+        echo "Application deployed to: http://${{ steps.instance-info.outputs.public_ip }}:3000"

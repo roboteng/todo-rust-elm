@@ -674,7 +674,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "use",
 ]
 
 [[package]]
@@ -1042,12 +1041,6 @@ name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
-
-[[package]]
-name = "use"
-version = "0.0.1-pre.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f916b8b6102de89f9999988ddc8e9bd0f119a8344e06bb19b0b03fb655769035"
 
 [[package]]
 name = "utf-8"

@@ -1,3 +1,4 @@
 /target
 /elm-stuff
 /assets/elm.js
+**/node_modules
