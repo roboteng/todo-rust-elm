@@ -87,6 +87,9 @@ jobs:
     - name: Install CDK dependencies
       run: cd deploy && npm ci
     
+    - name: Bootstrap CDK (if needed)
+      run: cd deploy && npx cdk bootstrap --require-approval never
+    
     - name: Deploy infrastructure with CDK
       run: cd deploy && npx cdk deploy --require-approval never
     
