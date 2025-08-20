@@ -68,7 +68,8 @@ async fn main() {
         );
 
     // run it with hyper
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .unwrap();
     tracing::debug!("listening on http://{}", listener.local_addr().unwrap());
