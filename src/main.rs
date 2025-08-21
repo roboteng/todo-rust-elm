@@ -68,8 +68,7 @@ async fn main() {
         );
 
     // run it with hyper
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
     tracing::debug!("listening on http://{}", listener.local_addr().unwrap());
@@ -109,12 +108,17 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
 
+    // This second task will receive messages from client and print them on server console
     let recv_task = tokio::spawn(async move {
+        let mut cnt = 0;
         while let Some(Ok(msg)) = receiver.next().await {
-            if process_message(msg, who, sender.clone()).await.is_break() {
+            cnt += 1;
+            // print message and break if instructed to do so
+            if process_message(msg, who, sender.clone()).is_break() {
                 break;
             }
         }
+        cnt
     });
 
     recv_task.await.unwrap();
@@ -139,18 +143,33 @@ enum InMsg {
 type Shared<T> = Arc<Mutex<T>>;
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
-async fn process_message(
-    message: Message,
+fn process_message(
+    msg: Message,
     who: SocketAddr,
     sender: Shared<SplitSink<WebSocket, Message>>,
 ) -> ControlFlow<(), ()> {
-    match message {
+    match msg {
         Message::Text(t) => {
-            let msg = serde_json::from_str::<InMsg>(t.as_str());
+            let k = serde_json::from_str::<InMsg>(t.as_str());
 
-            match msg {
-                Ok(msg) => handle_message(msg, sender).await,
-
+            match k {
+                Ok(InMsg::Greet(s)) => {
+                    let name = s.clone();
+                    tokio::spawn(async move {
+                        let mut send = sender.lock().await;
+                        send.send(Message::Text(
+                            serde_json::to_string(&OutMsg::Greet(format!(
+                                "Hello, {name}!, You've been greeted from the other side"
+                            )))
+                            .unwrap()
+                            .into(),
+                        ))
+                        .await
+                        .unwrap();
+                    });
+                    tracing::info!("Got greet: {s}");
+                }
+                Ok(InMsg::StartScanning) => tracing::info!("Got start_scanning"),
                 Err(e) => {
                     tracing::error!("Unhandled message: {e}");
                 }
@@ -182,24 +201,4 @@ async fn process_message(
         }
     }
     ControlFlow::Continue(())
-}
-
-async fn handle_message(msg: InMsg, sender: Shared<SplitSink<WebSocket, Message>>) {
-    match msg {
-        InMsg::Greet(name) => {
-            let mut send = sender.lock().await;
-            send.send(Message::Text(
-                serde_json::to_string(&OutMsg::Greet(format!(
-                    "Hello, {name}!, You've been greeted from the other side"
-                )))
-                .unwrap()
-                .into(),
-            ))
-            .await
-            .unwrap();
-
-            tracing::info!("Got greet: {name}");
-        }
-        InMsg::StartScanning => tracing::info!("Got start_scanning"),
-    }
 }
