@@ -30,13 +30,7 @@ pub struct Env {
 pub async fn run_app(env: Env) {
     let assets_dir = PathBuf::from(".").join("assets");
 
-    let app = Router::new()
-        .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
-        .route("/ws", any(ws_handler))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        );
+    let app = make_app(assets_dir);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", env.host, env.port))
         .await
@@ -48,6 +42,16 @@ pub async fn run_app(env: Env) {
     )
     .await
     .unwrap();
+}
+
+fn make_app(assets_dir: PathBuf) -> Router {
+    Router::new()
+        .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
+        .route("/ws", any(ws_handler))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
+        )
 }
 
 /// The handler for the HTTP request (this gets called when the HTTP request lands at the start
@@ -65,13 +69,10 @@ async fn ws_handler(
     } else {
         String::from("Unknown browser")
     };
-    println!("`{user_agent}` at {addr} connected.");
-    // finalize the upgrade process by returning upgrade callback.
-    // we can customize the callback by sending additional info such as address.
+    tracing::debug!("`{user_agent}` at {addr} connected.");
     ws.on_upgrade(move |socket| handle_socket(socket, addr))
 }
 
-/// Actual websocket statemachine (one will be spawned per connection)
 async fn handle_socket(socket: WebSocket, who: SocketAddr) {
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
@@ -97,13 +98,13 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
     println!("Websocket context {who} destroyed");
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum OutMsg {
     Greet(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum InMsg {
     Greet(String),
@@ -171,4 +172,58 @@ fn process_message(
         }
     }
     ControlFlow::Continue(())
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_websocket() {
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let temp = std::env::temp_dir();
+        let app = make_app(temp);
+
+        // Spawn server in background
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        // Connect WebSocket client
+        let url = format!("ws://{}/ws", addr);
+        let (mut ws_stream, _) = connect_async(&url).await.unwrap();
+
+        // Test sending greet message
+        let greet_msg = serde_json::to_string(&InMsg::Greet("test".to_string())).unwrap();
+        ws_stream
+            .send(TungsteniteMessage::Text(greet_msg))
+            .await
+            .unwrap();
+
+        // Wait for response
+        if let Some(msg) = ws_stream.next().await {
+            let msg = msg.unwrap();
+            if let TungsteniteMessage::Text(text) = msg {
+                let response: OutMsg = serde_json::from_str(&text).unwrap();
+                match response {
+                    OutMsg::Greet(greeting) => {
+                        assert!(greeting.contains("Hello, test!"));
+                    }
+                }
+            }
+        }
+    }
 }
