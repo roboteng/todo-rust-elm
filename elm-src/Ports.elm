@@ -1,4 +1,4 @@
-port module Ports exposing (recvAction, send, OutMessage(..))
+port module Ports exposing (recv, send, OutMessage(..), InMessage(..))
 
 import Dict exposing (Dict)
 import Json.Decode exposing (errorToString, field, map2)
@@ -13,6 +13,9 @@ port recvMessage : (Value -> msg) -> Sub msg
 type OutMessage =
     Greet String
     | StartScanning
+
+type InMessage =
+    Greeting String
 
 send : OutMessage -> Cmd msg
 send outMsg =
@@ -42,18 +45,47 @@ sendAction action = sendMessage
             ]
         )
 
-recvAction : Dict String (Value -> msg) -> (String -> msg) -> Sub msg
-recvAction onAction onError =
+encodeMessage : InMessage -> Value
+encodeMessage msg =
+    case msg of
+        Greeting s ->
+            object
+                [ ( "action", Json.Encode.string "greet" )
+                , ( "payload", Json.Encode.string s )
+                ]
+
+
+
+recv : (InMessage -> msg) -> (String -> msg) -> Sub msg
+recv onMessage onError =
     recvMessage <|
         \value ->
-            case Json.Decode.decodeValue decodeAction value of
-                Ok action ->
-                    Dict.get action.action onAction
-                        |> Maybe.map (\a -> a action.payload)
-                        |> Maybe.withDefault (onError ("Unknown Command" ++ action.action))
+            case decodeIncomingMessage value of
+                Ok incomingMsg ->
+                    onMessage incomingMsg
 
-                Err e ->
-                    onError (errorToString e)
+                Err error ->
+                    onError error
+
+
+decodeIncomingMessage : Value -> Result String InMessage
+decodeIncomingMessage value =
+    case Json.Decode.decodeValue decodeAction value of
+        Ok action ->
+            case action.action of
+                "greet" ->
+                    case Json.Decode.decodeValue Json.Decode.string action.payload of
+                        Ok s ->
+                            Ok (Greeting s)
+
+                        Err e ->
+                            Err ("Failed to decode greet payload: " ++ errorToString e)
+
+                unknown ->
+                    Err ("Unknown action: " ++ unknown)
+
+        Err e ->
+            Err ("Failed to decode action: " ++ errorToString e)
 
 
 type alias Action =

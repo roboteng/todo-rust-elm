@@ -6,7 +6,7 @@ import Dict
 import Html exposing (..)
 import Html.Events exposing (onClick)
 import Json.Decode exposing (Value, errorToString)
-import Ports exposing (recvAction, send, OutMessage)
+import Ports exposing (recv, send, OutMessage, InMessage)
 import Url
 
 
@@ -46,7 +46,7 @@ type Msg
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
     | SendGreet String
-    | RecvGreet String
+    | Recv InMessage
     | PortError String
     | StartScanning
 
@@ -75,10 +75,12 @@ update msg model =
             , send <| Ports.Greet s
             )
 
-        RecvGreet s ->
-            ( { model | name = s }
-            , Cmd.none
-            )
+        Recv inMsg ->
+            case inMsg of
+                Ports.Greeting m ->
+                    (  { model | name = m }
+                    , Cmd.none
+                    )
 
         StartScanning ->
             ( model, send <| Ports.StartScanning )
@@ -89,24 +91,14 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    recvAction
-        (Dict.fromList
-            [ ( "greet"
-              , decodeGreet
-              )
-            , ( "start_scanning"
-              , decodeEmpty
-              )
-            ]
-        )
-        PortError
+    recv Recv PortError
 
 
 decodeGreet : Value -> Msg
 decodeGreet v =
     case Json.Decode.decodeValue Json.Decode.string v of
         Ok g ->
-            RecvGreet g
+            Recv <| Ports.Greeting g
 
         Err e ->
             PortError (errorToString e)
@@ -121,8 +113,7 @@ view model =
     { title = "Application Title"
     , body =
         [ div []
-            [ text "Web Application"
-            , text model.name
+            [ text model.name
             , button [ onClick (SendGreet "Me") ] [ text "click" ]
             , text (Maybe.withDefault "" model.error)
             ]
