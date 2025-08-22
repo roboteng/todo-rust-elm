@@ -1,4 +1,4 @@
-port module Ports exposing (recvAction, sendGreet, sendStartScanning)
+port module Ports exposing (recvAction, send, OutMessage(..))
 
 import Dict exposing (Dict)
 import Json.Decode exposing (errorToString, field, map2)
@@ -10,6 +10,18 @@ port sendMessage : Value -> Cmd msg
 
 port recvMessage : (Value -> msg) -> Sub msg
 
+type OutMessage =
+    Greet String
+    | StartScanning
+
+send : OutMessage -> Cmd msg
+send outMsg =
+    case outMsg of
+        Greet s ->
+            sendGreet s
+
+        StartScanning ->
+            sendStartScanning
 
 sendGreet : String -> Cmd msg
 sendGreet s =
@@ -20,14 +32,15 @@ sendGreet s =
             ]
         )
 
-
+sendStartScanning : Cmd msg
 sendStartScanning =
-    sendMessage
+     sendAction  "start_scanning"
+
+sendAction action = sendMessage
         (object
-            [ ( "action", string "start_scanning" )
+            [ ( "action", string action )
             ]
         )
-
 
 recvAction : Dict String (Value -> msg) -> (String -> msg) -> Sub msg
 recvAction onAction onError =

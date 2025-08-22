@@ -6,7 +6,7 @@ import Dict
 import Html exposing (..)
 import Html.Events exposing (onClick)
 import Json.Decode exposing (Value, errorToString)
-import Ports exposing (recvAction, sendGreet, sendStartScanning)
+import Ports exposing (recvAction, send, OutMessage)
 import Url
 
 
@@ -72,7 +72,7 @@ update msg model =
 
         SendGreet s ->
             ( model
-            , sendGreet s
+            , send <| Ports.Greet s
             )
 
         RecvGreet s ->
@@ -81,7 +81,7 @@ update msg model =
             )
 
         StartScanning ->
-            ( model, sendStartScanning )
+            ( model, send <| Ports.StartScanning )
 
         PortError e ->
             ( { model | error = Just e }, Cmd.none )
