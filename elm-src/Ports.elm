@@ -1,4 +1,4 @@
-port module Ports exposing (InMessage(..), OutMessage(..), recv, send)
+port module Ports exposing (InMessage(..), OutMessage(..), decodeIncomingMessage, recv, send)
 
 import Dict exposing (Dict)
 import Json.Decode exposing (errorToString, field, map2)
@@ -35,22 +35,23 @@ sendGreet s =
     sendHelp "greet" (Just (string s))
 
 
-sendHelp : String -> Maybe Value -> Cmd msg
-sendHelp action payload =
-    let
-        act =  [ ( "action", string action ) ]
-        pay =
-            payload
-            |> Maybe.map (\p -> [ ( "payload", p ) ])
-            |> Maybe.withDefault []
-
-    in
-        sendMessage <| object <| act ++ pay
-
-
 sendStartScanning : Cmd msg
 sendStartScanning =
     sendHelp "start_scanning" Nothing
+
+
+sendHelp : String -> Maybe Value -> Cmd msg
+sendHelp action payload =
+    let
+        act =
+            [ ( "action", string action ) ]
+
+        pay =
+            payload
+                |> Maybe.map (\p -> [ ( "payload", p ) ])
+                |> Maybe.withDefault []
+    in
+    sendMessage <| object <| act ++ pay
 
 
 recv : (InMessage -> msg) -> (String -> msg) -> Sub msg
@@ -71,18 +72,23 @@ decodeIncomingMessage value =
         Ok action ->
             case action.action of
                 "greet" ->
-                    case Json.Decode.decodeValue Json.Decode.string action.payload of
-                        Ok s ->
-                            Ok (Greeting s)
-
-                        Err e ->
-                            Err ("Failed to decode greet payload: " ++ errorToString e)
+                    decodeGreet action.payload
 
                 unknown ->
                     Err ("Unknown action: " ++ unknown)
 
         Err e ->
             Err ("Failed to decode action: " ++ errorToString e)
+
+
+decodeGreet : Value -> Result String InMessage
+decodeGreet value =
+    case Json.Decode.decodeValue Json.Decode.string value of
+        Ok s ->
+            Ok (Greeting s)
+
+        Err e ->
+            Err ("Failed to decode greet payload: " ++ errorToString e)
 
 
 type alias Action =

@@ -18,6 +18,9 @@ jobs:
       with:
         elm-version: 0.19.1
     
+    - name: Install elm-test
+      run: npm install -g elm-test
+    
     - name: Setup Rust
       uses: actions-rs/toolchain@v1
       with:
@@ -44,6 +47,9 @@ jobs:
     
     - name: Build Elm
       run: elm make elm-src/Main.elm --output assets/elm.js
+    
+    - name: Run Elm tests
+      run: elm-test
     
     - name: Run Cargo tests
       run: cargo test
