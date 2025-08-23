@@ -1,4 +1,4 @@
-port module Ports exposing (recv, send, OutMessage(..), InMessage(..))
+port module Ports exposing (InMessage(..), OutMessage(..), recv, send)
 
 import Dict exposing (Dict)
 import Json.Decode exposing (errorToString, field, map2)
@@ -10,12 +10,15 @@ port sendMessage : Value -> Cmd msg
 
 port recvMessage : (Value -> msg) -> Sub msg
 
-type OutMessage =
-    Greet String
+
+type OutMessage
+    = Greet String
     | StartScanning
 
-type InMessage =
-    Greeting String
+
+type InMessage
+    = Greeting String
+
 
 send : OutMessage -> Cmd msg
 send outMsg =
@@ -26,34 +29,28 @@ send outMsg =
         StartScanning ->
             sendStartScanning
 
+
 sendGreet : String -> Cmd msg
 sendGreet s =
-    sendMessage
-        (object
-            [ ( "action", string "greet" )
-            , ( "payload", string s )
-            ]
-        )
+    sendHelp "greet" (Just (string s))
+
+
+sendHelp : String -> Maybe Value -> Cmd msg
+sendHelp action payload =
+    let
+        act =  [ ( "action", string action ) ]
+        pay =
+            payload
+            |> Maybe.map (\p -> [ ( "payload", p ) ])
+            |> Maybe.withDefault []
+
+    in
+        sendMessage <| object <| act ++ pay
+
 
 sendStartScanning : Cmd msg
 sendStartScanning =
-     sendAction  "start_scanning"
-
-sendAction action = sendMessage
-        (object
-            [ ( "action", string action )
-            ]
-        )
-
-encodeMessage : InMessage -> Value
-encodeMessage msg =
-    case msg of
-        Greeting s ->
-            object
-                [ ( "action", Json.Encode.string "greet" )
-                , ( "payload", Json.Encode.string s )
-                ]
-
+    sendHelp "start_scanning" Nothing
 
 
 recv : (InMessage -> msg) -> (String -> msg) -> Sub msg
