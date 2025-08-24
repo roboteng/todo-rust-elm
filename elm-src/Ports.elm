@@ -1,6 +1,5 @@
 port module Ports exposing (InMessage(..), OutMessage(..), decodeIncomingMessage, recv, send)
 
-import Dict exposing (Dict)
 import Json.Decode exposing (errorToString, field, map2)
 import Json.Encode exposing (Value, object, string)
 

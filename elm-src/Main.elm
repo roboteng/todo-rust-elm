@@ -2,10 +2,11 @@ module Main exposing (main)
 
 import Browser
 import Browser.Navigation as Nav
-import Dict
-import Html exposing (..)
+import Css exposing (..)
+import Html
 import Html.Events exposing (onClick)
-import Json.Decode exposing (Value, errorToString)
+import Html.Styled exposing (..)
+import Html.Styled.Attributes exposing (..)
 import Ports exposing (InMessage, OutMessage, recv, send)
 import Url
 
@@ -96,13 +97,15 @@ subscriptions _ =
 
 view : Model -> Browser.Document Msg
 view model =
-    { title = "Application Title"
+    { title = "Next Steps - TrevDo"
     , body =
-        [ div []
-            [ text model.name
-            , button [ onClick (Greet "Me") ] [ text "click" ]
-            , text (Maybe.withDefault "" model.error)
-            ]
-        , button [ onClick StartScanning ] [ text "Start Scanning" ]
+        [ toUnstyled <|
+            div []
+                [ ul [ css [ listStyleType none ] ]
+                    [ li [] [ text "Take out the trash" ]
+                    , li [] [ text "Scoop catboxes" ]
+                    , li [] [ text "Wash dishes" ]
+                    ]
+                ]
         ]
     }
