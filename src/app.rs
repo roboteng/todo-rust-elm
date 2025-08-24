@@ -81,11 +81,12 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
 
     // This second task will receive messages from client and print them on server console
     let recv_task = tokio::spawn(async move {
+        let tasks = Arc::new(Mutex::new(vec![]));
         let mut cnt = 0;
         while let Some(Ok(msg)) = receiver.next().await {
             cnt += 1;
             // print message and break if instructed to do so
-            if process_message(msg, who, sender.clone()).is_break() {
+            if process_message(msg, who, sender.clone(), tasks.clone()).is_break() {
                 break;
             }
         }
@@ -101,14 +102,13 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum OutMsg {
-    Greet(String),
+    NewTasks(Vec<String>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum InMsg {
-    Greet(String),
-    StartScanning,
+    Tasks(Vec<String>),
 }
 
 type Shared<T> = Arc<Mutex<T>>;
@@ -118,29 +118,28 @@ fn process_message(
     msg: Message,
     who: SocketAddr,
     sender: Shared<SplitSink<WebSocket, Message>>,
+    tasks: Shared<Vec<String>>,
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
             let k = serde_json::from_str::<InMsg>(t.as_str());
 
             match k {
-                Ok(InMsg::Greet(s)) => {
-                    let name = s.clone();
+                Ok(InMsg::Tasks(ts)) => {
                     tokio::spawn(async move {
+                        let mut tasks = tasks.lock().await;
+                        tasks.extend(ts);
                         let mut send = sender.lock().await;
                         send.send(Message::Text(
-                            serde_json::to_string(&OutMsg::Greet(format!(
-                                "Hello, {name}!, You've been greeted from the other side"
-                            )))
-                            .unwrap()
-                            .into(),
+                            serde_json::to_string(&OutMsg::NewTasks(tasks.clone()))
+                                .unwrap()
+                                .into(),
                         ))
                         .await
                         .unwrap();
+                        tracing::debug!("Got {} tasks", tasks.len());
                     });
-                    tracing::info!("Got greet: {s}");
                 }
-                Ok(InMsg::StartScanning) => tracing::info!("Got start_scanning"),
                 Err(e) => {
                     tracing::error!("Unhandled message: {e}");
                 }
@@ -207,7 +206,7 @@ mod tests {
         let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
         // Test sending greet message
-        let greet_msg = serde_json::to_string(&InMsg::Greet("test".to_string())).unwrap();
+        let greet_msg = serde_json::to_string(&InMsg::Tasks(vec!["test".to_string()])).unwrap();
         ws_stream
             .send(TungsteniteMessage::Text(greet_msg))
             .await
@@ -219,8 +218,8 @@ mod tests {
             if let TungsteniteMessage::Text(text) = msg {
                 let response: OutMsg = serde_json::from_str(&text).unwrap();
                 match response {
-                    OutMsg::Greet(greeting) => {
-                        assert!(greeting.contains("Hello, test!"));
+                    OutMsg::NewTasks(tasks) => {
+                        assert!(tasks[0] == "test");
                     }
                 }
             }

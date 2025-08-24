@@ -4,9 +4,9 @@ import Browser
 import Browser.Navigation as Nav
 import Css exposing (..)
 import Html
-import Html.Events exposing (onClick)
 import Html.Styled exposing (..)
 import Html.Styled.Attributes exposing (..)
+import Html.Styled.Events exposing (onClick)
 import Ports exposing (InMessage, OutMessage, recv, send)
 import Url
 
@@ -26,7 +26,7 @@ main =
 type alias Model =
     { key : Nav.Key
     , url : Url.Url
-    , name : String
+    , tasks : List String
     , error : Maybe String
     }
 
@@ -35,7 +35,11 @@ init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
     ( { key = key
       , url = url
-      , name = ""
+      , tasks =
+            [ "Buy milk"
+            , "Walk the dog"
+            , "Do the laundry"
+            ]
       , error = Nothing
       }
     , Cmd.none
@@ -46,8 +50,7 @@ type Msg
     = None
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
-    | Greet String
-    | StartScanning
+    | SendTasks (List String)
     | Recv InMessage
     | PortError String
 
@@ -71,18 +74,15 @@ update msg model =
             , Cmd.none
             )
 
-        Greet s ->
+        SendTasks ts ->
             ( model
-            , send <| Ports.Greet s
+            , send <| Ports.Tasks ts
             )
-
-        StartScanning ->
-            ( model, send <| Ports.StartScanning )
 
         Recv inMsg ->
             case inMsg of
-                Ports.Greeting m ->
-                    ( { model | name = m }
+                Ports.NewTasks ts ->
+                    ( { model | tasks = ts }
                     , Cmd.none
                     )
 
@@ -102,10 +102,11 @@ view model =
         [ toUnstyled <|
             div []
                 [ ul [ css [ listStyleType none ] ]
-                    [ li [] [ text "Take out the trash" ]
-                    , li [] [ text "Scoop catboxes" ]
-                    , li [] [ text "Wash dishes" ]
-                    ]
+                    (List.map
+                        (\task -> li [] [ text task ])
+                        model.tasks
+                    )
+                , button [ onClick <| SendTasks model.tasks ] [ text "Save Tasks" ]
                 ]
         ]
     }

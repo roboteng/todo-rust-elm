@@ -10,17 +10,17 @@ suite : Test
 suite =
     describe "Ports"
         [ describe "decodeIncomingMessage"
-            [ test "successfully decodes a greeting message" <|
+            [ test "successfully decodes a new_tasks message" <|
                 \_ ->
                     let
                         json =
                             Encode.object
-                                [ ( "action", Encode.string "greet" )
-                                , ( "payload", Encode.string "Hello World" )
+                                [ ( "action", Encode.string "new_tasks" )
+                                , ( "payload", Encode.list Encode.string [ "Hello World" ] )
                                 ]
                     in
                     decodeIncomingMessage json
-                        |> Expect.equal (Ok (Greeting "Hello World"))
+                        |> Expect.equal (Ok (NewTasks [ "Hello World" ]))
             , test "returns error for unknown action" <|
                 \_ ->
                     let
@@ -45,7 +45,7 @@ suite =
                     let
                         json =
                             Encode.object
-                                [ ( "action", Encode.string "greet" )
+                                [ ( "action", Encode.string "new_task" )
                                 , ( "payload", Encode.int 42 )
                                 ]
                     in

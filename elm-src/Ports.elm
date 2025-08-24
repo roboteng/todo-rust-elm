@@ -1,7 +1,7 @@
 port module Ports exposing (InMessage(..), OutMessage(..), decodeIncomingMessage, recv, send)
 
 import Json.Decode exposing (errorToString, field, map2)
-import Json.Encode exposing (Value, object, string)
+import Json.Encode exposing (Value, list, object, string)
 
 
 port sendMessage : Value -> Cmd msg
@@ -11,32 +11,23 @@ port recvMessage : (Value -> msg) -> Sub msg
 
 
 type OutMessage
-    = Greet String
-    | StartScanning
+    = Tasks (List String)
 
 
 type InMessage
-    = Greeting String
+    = NewTasks (List String)
 
 
 send : OutMessage -> Cmd msg
 send outMsg =
     case outMsg of
-        Greet s ->
-            sendGreet s
-
-        StartScanning ->
-            sendStartScanning
+        Tasks ts ->
+            sendTasks ts
 
 
-sendGreet : String -> Cmd msg
-sendGreet s =
-    sendHelp "greet" (Just (string s))
-
-
-sendStartScanning : Cmd msg
-sendStartScanning =
-    sendHelp "start_scanning" Nothing
+sendTasks : List String -> Cmd msg
+sendTasks ts =
+    sendHelp "tasks" (Just (list string ts))
 
 
 sendHelp : String -> Maybe Value -> Cmd msg
@@ -70,8 +61,8 @@ decodeIncomingMessage value =
     case Json.Decode.decodeValue decodeAction value of
         Ok action ->
             case action.action of
-                "greet" ->
-                    decodeGreet action.payload
+                "new_tasks" ->
+                    decodeTasks action.payload
 
                 unknown ->
                     Err ("Unknown action: " ++ unknown)
@@ -80,11 +71,11 @@ decodeIncomingMessage value =
             Err ("Failed to decode action: " ++ errorToString e)
 
 
-decodeGreet : Value -> Result String InMessage
-decodeGreet value =
-    case Json.Decode.decodeValue Json.Decode.string value of
+decodeTasks : Value -> Result String InMessage
+decodeTasks value =
+    case Json.Decode.decodeValue (Json.Decode.list Json.Decode.string) value of
         Ok s ->
-            Ok (Greeting s)
+            Ok (NewTasks s)
 
         Err e ->
             Err ("Failed to decode greet payload: " ++ errorToString e)
