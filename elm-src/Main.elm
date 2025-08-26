@@ -7,7 +7,8 @@ import Html
 import Html.Styled exposing (..)
 import Html.Styled.Attributes exposing (..)
 import Html.Styled.Events exposing (onClick)
-import Ports exposing (InMessage, OutMessage, recv, send)
+import Ports as P
+import Tasks
 import Url
 
 
@@ -26,7 +27,7 @@ main =
 type alias Model =
     { key : Nav.Key
     , url : Url.Url
-    , tasks : List String
+    , tasks : Tasks.Tasks
     , error : Maybe String
     }
 
@@ -36,10 +37,7 @@ init _ url key =
     ( { key = key
       , url = url
       , tasks =
-            [ "Buy milk"
-            , "Walk the dog"
-            , "Do the laundry"
-            ]
+            Tasks.empty
       , error = Nothing
       }
     , Cmd.none
@@ -51,7 +49,8 @@ type Msg
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
     | SendTasks (List String)
-    | Recv InMessage
+    | AddTask Tasks.NewTask
+    | Recv P.InMessage
     | PortError String
 
 
@@ -76,23 +75,28 @@ update msg model =
 
         SendTasks ts ->
             ( model
-            , send <| Ports.Tasks ts
+            , P.send <| P.Tasks ts
             )
 
         Recv inMsg ->
             case inMsg of
-                Ports.NewTasks ts ->
-                    ( { model | tasks = ts }
+                P.NewTasks ts ->
+                    ( model
                     , Cmd.none
                     )
 
         PortError e ->
             ( { model | error = Just e }, Cmd.none )
 
+        AddTask task ->
+            ( { model | tasks = Tasks.newTask model.tasks task }
+            , Cmd.none
+            )
+
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    recv Recv PortError
+    P.recv Recv PortError
 
 
 view : Model -> Browser.Document Msg
@@ -103,10 +107,10 @@ view model =
             div []
                 [ ul [ css [ listStyleType none ] ]
                     (List.map
-                        (\task -> li [] [ text task ])
-                        model.tasks
+                        (\task -> li [] [ text task.summary ])
+                        model.tasks.tasks
                     )
-                , button [ onClick <| SendTasks model.tasks ] [ text "Save Tasks" ]
+                , button [ onClick <| AddTask { summary = "Item" } ] [ text "Save Tasks" ]
                 ]
         ]
     }
