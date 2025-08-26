@@ -1,5 +1,8 @@
 module Tasks exposing (..)
 
+import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode exposing (Value)
+
 
 type alias NewTask =
     { summary : String
@@ -28,3 +31,54 @@ newTask tasks task =
     { tasks = { id = tasks.nextId, summary = task.summary } :: tasks.tasks
     , nextId = tasks.nextId + 1
     }
+
+
+
+-- ENCODERS
+
+
+encodeNewTask : NewTask -> Value
+encodeNewTask task =
+    Encode.object
+        [ ( "summary", Encode.string task.summary )
+        ]
+
+
+encodeTask : Task -> Value
+encodeTask task =
+    Encode.object
+        [ ( "id", Encode.int task.id )
+        , ( "summary", Encode.string task.summary )
+        ]
+
+
+encodeTasks : Tasks -> Value
+encodeTasks tasks =
+    Encode.object
+        [ ( "tasks", Encode.list encodeTask tasks.tasks )
+        , ( "next_id", Encode.int tasks.nextId )
+        ]
+
+
+
+-- DECODERS
+
+
+decodeNewTask : Decoder NewTask
+decodeNewTask =
+    Decode.map NewTask
+        (Decode.field "summary" Decode.string)
+
+
+decodeTask : Decoder Task
+decodeTask =
+    Decode.map2 Task
+        (Decode.field "id" Decode.int)
+        (Decode.field "summary" Decode.string)
+
+
+decodeTasks : Decoder Tasks
+decodeTasks =
+    Decode.map2 Tasks
+        (Decode.field "tasks" (Decode.list decodeTask))
+        (Decode.field "next_id" Decode.int)

@@ -3,7 +3,6 @@ module Main exposing (main)
 import Browser
 import Browser.Navigation as Nav
 import Css exposing (..)
-import Html
 import Html.Styled exposing (..)
 import Html.Styled.Attributes exposing (..)
 import Html.Styled.Events exposing (onClick)
@@ -48,7 +47,7 @@ type Msg
     = None
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
-    | SendTasks (List String)
+    | SendTasks Tasks.Tasks
     | AddTask Tasks.NewTask
     | Recv P.InMessage
     | PortError String
@@ -81,7 +80,7 @@ update msg model =
         Recv inMsg ->
             case inMsg of
                 P.NewTasks ts ->
-                    ( model
+                    ( { model | tasks = ts }
                     , Cmd.none
                     )
 
@@ -110,7 +109,8 @@ view model =
                         (\task -> li [] [ text task.summary ])
                         model.tasks.tasks
                     )
-                , button [ onClick <| AddTask { summary = "Item" } ] [ text "Save Tasks" ]
+                , button [ onClick <| AddTask { summary = "Item" } ] [ text "Add Task" ]
+                , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
                 ]
         ]
     }

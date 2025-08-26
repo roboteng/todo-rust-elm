@@ -81,12 +81,15 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
 
     // This second task will receive messages from client and print them on server console
     let recv_task = tokio::spawn(async move {
-        let tasks = Arc::new(Mutex::new(vec![]));
+        let tasks_state = Arc::new(Mutex::new(Tasks {
+            tasks: vec![],
+            next_id: 0,
+        }));
         let mut cnt = 0;
         while let Some(Ok(msg)) = receiver.next().await {
             cnt += 1;
             // print message and break if instructed to do so
-            if process_message(msg, who, sender.clone(), tasks.clone()).is_break() {
+            if process_message(msg, who, sender.clone(), tasks_state.clone()).is_break() {
                 break;
             }
         }
@@ -99,16 +102,34 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
     println!("Websocket context {who} destroyed");
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct NewTask {
+    summary: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct Task {
+    id: i32,
+    summary: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+struct Tasks {
+    tasks: Vec<Task>,
+    next_id: i32,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum OutMsg {
-    NewTasks(Vec<String>),
+    NewTasks(Tasks),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum InMsg {
-    Tasks(Vec<String>),
+    Tasks(Tasks),
 }
 
 type Shared<T> = Arc<Mutex<T>>;
@@ -118,26 +139,29 @@ fn process_message(
     msg: Message,
     who: SocketAddr,
     sender: Shared<SplitSink<WebSocket, Message>>,
-    tasks: Shared<Vec<String>>,
+    tasks_state: Shared<Tasks>,
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
             let k = serde_json::from_str::<InMsg>(t.as_str());
 
             match k {
-                Ok(InMsg::Tasks(ts)) => {
+                Ok(InMsg::Tasks(client_tasks)) => {
                     tokio::spawn(async move {
-                        let mut tasks = tasks.lock().await;
-                        tasks.extend(ts);
+                        // Client is source of truth - replace server state with client state
+                        let mut current_state = tasks_state.lock().await;
+                        *current_state = client_tasks.clone();
+                        
                         let mut send = sender.lock().await;
                         send.send(Message::Text(
-                            serde_json::to_string(&OutMsg::NewTasks(tasks.clone()))
+                            serde_json::to_string(&OutMsg::NewTasks(client_tasks))
                                 .unwrap()
                                 .into(),
                         ))
                         .await
                         .unwrap();
-                        tracing::debug!("Got {} tasks", tasks.len());
+                        tracing::debug!("Updated tasks from client: {} tasks, next_id: {}", 
+                            current_state.tasks.len(), current_state.next_id);
                     });
                 }
                 Err(e) => {
@@ -205,10 +229,17 @@ mod tests {
         let url = format!("ws://{}/ws", addr);
         let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
-        // Test sending greet message
-        let greet_msg = serde_json::to_string(&InMsg::Tasks(vec!["test".to_string()])).unwrap();
+        // Test sending tasks message
+        let test_tasks = Tasks {
+            tasks: vec![Task {
+                id: 1,
+                summary: "test".to_string(),
+            }],
+            next_id: 2,
+        };
+        let tasks_msg = serde_json::to_string(&InMsg::Tasks(test_tasks.clone())).unwrap();
         ws_stream
-            .send(TungsteniteMessage::Text(greet_msg))
+            .send(TungsteniteMessage::Text(tasks_msg))
             .await
             .unwrap();
 
@@ -219,7 +250,9 @@ mod tests {
                 let response: OutMsg = serde_json::from_str(&text).unwrap();
                 match response {
                     OutMsg::NewTasks(tasks) => {
-                        assert!(tasks[0] == "test");
+                        assert_eq!(tasks.tasks[0].summary, "test");
+                        assert_eq!(tasks.tasks[0].id, 1);
+                        assert_eq!(tasks.next_id, 2);
                     }
                 }
             }

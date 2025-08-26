@@ -3,6 +3,7 @@ module PortsTest exposing (..)
 import Expect exposing (Expectation)
 import Json.Encode as Encode
 import Ports exposing (InMessage(..), decodeIncomingMessage)
+import Tasks as T
 import Test exposing (..)
 
 
@@ -13,14 +14,19 @@ suite =
             [ test "successfully decodes a new_tasks message" <|
                 \_ ->
                     let
+                        expectedTasks =
+                            { tasks = [ { id = 1, summary = "Hello World" } ]
+                            , nextId = 2
+                            }
+
                         json =
                             Encode.object
                                 [ ( "action", Encode.string "new_tasks" )
-                                , ( "payload", Encode.list Encode.string [ "Hello World" ] )
+                                , ( "payload", T.encodeTasks expectedTasks )
                                 ]
                     in
                     decodeIncomingMessage json
-                        |> Expect.equal (Ok (NewTasks [ "Hello World" ]))
+                        |> Expect.equal (Ok (NewTasks expectedTasks))
             , test "returns error for unknown action" <|
                 \_ ->
                     let
@@ -40,12 +46,12 @@ suite =
                     in
                     decodeIncomingMessage json
                         |> Expect.err
-            , test "returns error for malformed greeting payload" <|
+            , test "returns error for malformed tasks payload" <|
                 \_ ->
                     let
                         json =
                             Encode.object
-                                [ ( "action", Encode.string "new_task" )
+                                [ ( "action", Encode.string "new_tasks" )
                                 , ( "payload", Encode.int 42 )
                                 ]
                     in

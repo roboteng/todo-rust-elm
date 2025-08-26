@@ -1,7 +1,8 @@
 port module Ports exposing (InMessage(..), OutMessage(..), decodeIncomingMessage, recv, send)
 
 import Json.Decode exposing (errorToString, field, map2)
-import Json.Encode exposing (Value, list, object, string)
+import Json.Encode exposing (Value, object, string)
+import Tasks as T
 
 
 port sendMessage : Value -> Cmd msg
@@ -11,11 +12,11 @@ port recvMessage : (Value -> msg) -> Sub msg
 
 
 type OutMessage
-    = Tasks (List String)
+    = Tasks T.Tasks
 
 
 type InMessage
-    = NewTasks (List String)
+    = NewTasks T.Tasks
 
 
 send : OutMessage -> Cmd msg
@@ -25,9 +26,9 @@ send outMsg =
             sendTasks ts
 
 
-sendTasks : List String -> Cmd msg
+sendTasks : T.Tasks -> Cmd msg
 sendTasks ts =
-    sendHelp "tasks" (Just (list string ts))
+    sendHelp "tasks" (Just (T.encodeTasks ts))
 
 
 sendHelp : String -> Maybe Value -> Cmd msg
@@ -73,12 +74,12 @@ decodeIncomingMessage value =
 
 decodeTasks : Value -> Result String InMessage
 decodeTasks value =
-    case Json.Decode.decodeValue (Json.Decode.list Json.Decode.string) value of
-        Ok s ->
-            Ok (NewTasks s)
+    case Json.Decode.decodeValue T.decodeTasks value of
+        Ok tasks ->
+            Ok (NewTasks tasks)
 
         Err e ->
-            Err ("Failed to decode greet payload: " ++ errorToString e)
+            Err ("Failed to decode tasks payload: " ++ errorToString e)
 
 
 type alias Action =
