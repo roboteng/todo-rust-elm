@@ -1,6 +1,9 @@
 use axum::{
     Router,
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    extract::{
+        State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     response::IntoResponse,
     routing::any,
 };
@@ -9,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use std::ops::ControlFlow;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
 use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
@@ -22,6 +25,14 @@ use futures_util::{
     stream::{SplitSink, StreamExt},
 };
 
+type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
+
+#[derive(Clone, Default)]
+struct AppState {
+    tasks: Arc<Mutex<Tasks>>,
+    clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
+}
+
 pub struct Env {
     pub port: u16,
     pub host: String,
@@ -30,7 +41,9 @@ pub struct Env {
 pub async fn run_app(env: Env) {
     let assets_dir = PathBuf::from(".").join("assets");
 
-    let app = make_app(assets_dir);
+    let app_state = AppState::default();
+
+    let app = make_app(assets_dir, app_state);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", env.host, env.port))
         .await
@@ -44,13 +57,14 @@ pub async fn run_app(env: Env) {
     .unwrap();
 }
 
-fn make_app(assets_dir: PathBuf) -> Router {
+fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
     Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws", any(ws_handler))
+        .with_state(app_state)
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
+                .make_span_with(DefaultMakeSpan::default().include_headers(false)),
         )
 }
 
@@ -61,6 +75,7 @@ fn make_app(assets_dir: PathBuf) -> Router {
 /// as well as things from HTTP headers such as user-agent of the browser etc.
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    State(app_state): State<AppState>,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
@@ -70,26 +85,44 @@ async fn ws_handler(
         String::from("Unknown browser")
     };
     tracing::debug!("`{user_agent}` at {addr} connected.");
-    ws.on_upgrade(move |socket| handle_socket(socket, addr))
+    ws.on_upgrade(move |socket| handle_socket(socket, addr, app_state))
 }
 
-async fn handle_socket(socket: WebSocket, who: SocketAddr) {
+async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) {
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
 
+    app_state.clients.lock().await.insert(who, sender.clone());
+
+    // Send current tasks to the newly connected client
+    {
+        let tasks = app_state.tasks.lock().await;
+        let mut send = sender.lock().await;
+        let sent = send
+            .send(Message::Text(
+                serde_json::to_string(&OutMsg::NewTasks(tasks.clone()))
+                    .unwrap()
+                    .into(),
+            ))
+            .await;
+        if let Err(e) = sent {
+            tracing::error!("Failed to send initial tasks to client {}: {}", who, e);
+        }
+    }
+
     // This second task will receive messages from client and print them on server console
+    let app_state_clone = app_state.clone();
     let recv_task = tokio::spawn(async move {
-        let tasks_state = Arc::new(Mutex::new(Tasks {
-            tasks: vec![],
-            next_id: 0,
-        }));
         let mut cnt = 0;
         while let Some(Ok(msg)) = receiver.next().await {
             cnt += 1;
             // print message and break if instructed to do so
-            if process_message(msg, who, sender.clone(), tasks_state.clone()).is_break() {
+            if process_message(msg, who, sender.clone(), app_state_clone.clone())
+                .await
+                .is_break()
+            {
                 break;
             }
         }
@@ -98,8 +131,9 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
 
     recv_task.await.unwrap();
 
-    // returning from the handler closes the websocket connection
-    println!("Websocket context {who} destroyed");
+    app_state.clients.lock().await.remove(&who);
+
+    tracing::debug!("Websocket context {who} destroyed");
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -113,7 +147,7 @@ struct Task {
     summary: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 struct Tasks {
     tasks: Vec<Task>,
@@ -134,12 +168,36 @@ enum InMsg {
 
 type Shared<T> = Arc<Mutex<T>>;
 
+async fn broadcast_tasks_to_all(app_state: &AppState, tasks: &Tasks) {
+    let clients = app_state.clients.lock().await;
+    let message = Message::Text(
+        serde_json::to_string(&OutMsg::NewTasks(tasks.clone()))
+            .unwrap()
+            .into(),
+    );
+
+    // Send to all connected clients
+    for (addr, sender) in clients.iter() {
+        let mut send = sender.lock().await;
+        if let Err(e) = send.send(message.clone()).await {
+            tracing::error!("Failed to send tasks update to client {}: {}", addr, e);
+        }
+    }
+
+    tracing::debug!(
+        "Broadcasted tasks to {} clients: {} tasks, next_id: {}",
+        clients.len(),
+        tasks.tasks.len(),
+        tasks.next_id
+    );
+}
+
 /// helper to print contents of messages to stdout. Has special treatment for Close.
-fn process_message(
+async fn process_message(
     msg: Message,
     who: SocketAddr,
-    sender: Shared<SplitSink<WebSocket, Message>>,
-    tasks_state: Shared<Tasks>,
+    _sender: Shared<SplitSink<WebSocket, Message>>,
+    app_state: AppState,
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
@@ -147,25 +205,17 @@ fn process_message(
 
             match k {
                 Ok(InMsg::Tasks(client_tasks)) => {
-                    tokio::spawn(async move {
-                        // Client is source of truth - replace server state with client state
-                        let mut current_state = tasks_state.lock().await;
+                    // Client is source of truth - replace server state with client state
+                    {
+                        let mut current_state = app_state.tasks.lock().await;
                         *current_state = client_tasks.clone();
-                        
-                        let mut send = sender.lock().await;
-                        send.send(Message::Text(
-                            serde_json::to_string(&OutMsg::NewTasks(client_tasks))
-                                .unwrap()
-                                .into(),
-                        ))
-                        .await
-                        .unwrap();
-                        tracing::debug!("Updated tasks from client: {} tasks, next_id: {}", 
-                            current_state.tasks.len(), current_state.next_id);
-                    });
+                    }
+
+                    // Broadcast the updated tasks to ALL connected clients
+                    broadcast_tasks_to_all(&app_state, &client_tasks).await;
                 }
                 Err(e) => {
-                    tracing::error!("Unhandled message: {e}");
+                    tracing::error!("Unhandled message from {}: {}", who, e);
                 }
             }
         }
@@ -213,7 +263,14 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let temp = std::env::temp_dir();
-        let app = make_app(temp);
+        let app_state = AppState {
+            tasks: Arc::new(Mutex::new(Tasks {
+                tasks: vec![],
+                next_id: 0,
+            })),
+            clients: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let app = make_app(temp, app_state);
 
         // Spawn server in background
         tokio::spawn(async move {
@@ -243,13 +300,29 @@ mod tests {
             .await
             .unwrap();
 
-        // Wait for response
+        // First message should be initial empty tasks
         if let Some(msg) = ws_stream.next().await {
             let msg = msg.unwrap();
             if let TungsteniteMessage::Text(text) = msg {
                 let response: OutMsg = serde_json::from_str(&text).unwrap();
                 match response {
                     OutMsg::NewTasks(tasks) => {
+                        // Should be empty initially
+                        assert_eq!(tasks.tasks.len(), 0);
+                        assert_eq!(tasks.next_id, 0);
+                    }
+                }
+            }
+        }
+
+        // Second message should be our broadcasted update
+        if let Some(msg) = ws_stream.next().await {
+            let msg = msg.unwrap();
+            if let TungsteniteMessage::Text(text) = msg {
+                let response: OutMsg = serde_json::from_str(&text).unwrap();
+                match response {
+                    OutMsg::NewTasks(tasks) => {
+                        assert_eq!(tasks.tasks.len(), 1);
                         assert_eq!(tasks.tasks[0].summary, "test");
                         assert_eq!(tasks.tasks[0].id, 1);
                         assert_eq!(tasks.next_id, 2);
