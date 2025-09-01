@@ -12,6 +12,8 @@ I'm building a Todo app for myself.The existing solutions (mostly Todoist and No
 - Contexts must be manually added
 - Separation between subtasks and projects is unclear
 
+https://gist.github.com/evancz/2b2ba366cae1887fe621
+
 ## Running
 
 - `elm make elm-src/Main.elm --output assets/elm.js`

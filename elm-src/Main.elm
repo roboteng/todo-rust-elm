@@ -7,6 +7,7 @@ import Html.Styled exposing (..)
 import Html.Styled.Attributes exposing (..)
 import Html.Styled.Events exposing (onClick)
 import Ports as P
+import Route exposing (Route, encodeRoute, parseRoute)
 import Tasks
 import Url
 
@@ -25,19 +26,19 @@ main =
 
 type alias Model =
     { key : Nav.Key
-    , url : Url.Url
     , tasks : Tasks.Tasks
     , error : Maybe String
+    , route : Route
     }
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
     ( { key = key
-      , url = url
       , tasks =
             Tasks.empty
       , error = Nothing
+      , route = parseRoute url
       }
     , Cmd.none
     )
@@ -68,7 +69,7 @@ update msg model =
                     ( model, Nav.load href )
 
         UrlChanged url ->
-            ( { model | url = url }
+            ( { model | route = parseRoute url }
             , Cmd.none
             )
 
@@ -103,14 +104,27 @@ view model =
     { title = "Next Steps - TrevDo"
     , body =
         [ toUnstyled <|
-            div []
-                [ ul [ css [ listStyleType none ] ]
-                    (List.map
-                        (\task -> li [] [ text task.summary ])
-                        model.tasks.tasks
-                    )
-                , button [ onClick <| AddTask { summary = "Item" } ] [ text "Add Task" ]
-                , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
-                ]
+            body model
         ]
     }
+
+
+body : Model -> Html Msg
+body model =
+    case model.route of
+        Route.Home ->
+            nextTasksView model
+
+
+nextTasksView : Model -> Html Msg
+nextTasksView model =
+    main_ []
+        [ ul [ css [ listStyleType none ] ]
+            (List.map
+                (\task -> li [] [ text task.summary ])
+                model.tasks.tasks
+            )
+        , button [ onClick <| AddTask { summary = "Item" } ] [ text "Add Task" ]
+        , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
+        , a [ href "/new" ] [ text "Create new Item" ]
+        ]
