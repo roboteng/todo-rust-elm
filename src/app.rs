@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use std::ops::ControlFlow;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
 use tower_http::{
-    services::ServeDir,
+    services::{ServeDir, ServeFile},
     trace::{DefaultMakeSpan, TraceLayer},
 };
 
@@ -59,7 +59,9 @@ pub async fn run_app(env: Env) {
 
 fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
     Router::new()
-        .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
+        .fallback_service(
+            ServeDir::new(&assets_dir).fallback(ServeFile::new(assets_dir.join("index.html"))),
+        )
         .route("/ws", any(ws_handler))
         .with_state(app_state)
         .layer(
