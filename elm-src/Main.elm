@@ -7,7 +7,7 @@ import Html.Styled exposing (..)
 import Html.Styled.Attributes exposing (..)
 import Html.Styled.Events exposing (onClick)
 import Ports as P
-import Route exposing (Route, encodeRoute, parseRoute)
+import Route exposing (Route(..), parseRoute)
 import Tasks
 import Url
 
@@ -38,7 +38,7 @@ init _ url key =
       , tasks =
             Tasks.empty
       , error = Nothing
-      , route = parseRoute url
+      , route = Route.parseRoute url
       }
     , Cmd.none
     )
@@ -115,6 +115,11 @@ body model =
         Route.Home ->
             nextTasksView model
 
+        Route.New ->
+            main_ []
+                [ text "new Task"
+                ]
+
 
 nextTasksView : Model -> Html Msg
 nextTasksView model =
@@ -126,5 +131,5 @@ nextTasksView model =
             )
         , button [ onClick <| AddTask { summary = "Item" } ] [ text "Add Task" ]
         , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
-        , a [ href "/new" ] [ text "Create new Item" ]
+        , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
         ]
