@@ -1,5 +1,8 @@
 module Tasks exposing (..)
 
+import Html.Styled exposing (Html, form, input, main_, text)
+import Html.Styled.Attributes exposing (placeholder, type_, value)
+import Html.Styled.Events exposing (onInput, onSubmit)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 
@@ -82,3 +85,43 @@ decodeTasks =
     Decode.map2 Tasks
         (Decode.field "tasks" (Decode.list decodeTask))
         (Decode.field "next_id" Decode.int)
+
+
+
+-- New Tasks
+
+
+type Msg
+    = NewTaskSummary String
+    | Create
+
+
+type NewTaskCmd
+    = NewTaskCreated NewTask
+    | None
+
+
+type alias Model =
+    { summary : String
+    }
+
+
+update : Msg -> Model -> ( Model, NewTaskCmd )
+update msg model =
+    case msg of
+        NewTaskSummary summary ->
+            ( { model | summary = summary }, None )
+
+        Create ->
+            ( { model | summary = "" }, NewTaskCreated <| NewTask model.summary )
+
+
+viewNewTask : Model -> Html Msg
+viewNewTask model =
+    main_ []
+        [ form
+            [ onSubmit <| Create ]
+            [ input [ type_ "text", placeholder "Summary", onInput <| NewTaskSummary, value model.summary ] []
+            , input [ type_ "submit" ] [ text "Create" ]
+            ]
+        ]

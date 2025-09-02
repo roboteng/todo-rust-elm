@@ -5,7 +5,7 @@ import Browser.Navigation as Nav
 import Css exposing (..)
 import Html.Styled exposing (..)
 import Html.Styled.Attributes exposing (..)
-import Html.Styled.Events exposing (onClick, onInput, onSubmit)
+import Html.Styled.Events exposing (onClick)
 import Ports as P
 import Route exposing (Route(..), parseRoute)
 import Tasks
@@ -33,11 +33,6 @@ type alias Model =
     }
 
 
-type alias NewTaskModel =
-    { summary : String
-    }
-
-
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
     ( { key = key
@@ -58,8 +53,7 @@ type Msg
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
     | SendTasks Tasks.Tasks
-    | NewTaskSummary String
-    | CreateNewTask Tasks.NewTask
+    | NewTaskMsg Tasks.Msg
     | Recv P.InMessage
     | PortError String
 
@@ -88,15 +82,20 @@ update msg model =
             , P.send <| P.Tasks ts
             )
 
-        NewTaskSummary summary ->
-            ( { model | newTask = { summary = summary } }
-            , Cmd.none
-            )
+        NewTaskMsg m ->
+            let
+                ( newModel, cmd ) =
+                    Tasks.update m model.newTask
 
-        CreateNewTask task ->
-            ( { model | newTask = { summary = "" }, tasks = Tasks.newTask model.tasks task }
-            , Cmd.none
-            )
+                tasks =
+                    case cmd of
+                        Tasks.None ->
+                            model.tasks
+
+                        Tasks.NewTaskCreated task ->
+                            Tasks.newTask model.tasks task
+            in
+            ( { model | newTask = newModel, tasks = tasks }, Cmd.none )
 
         Recv inMsg ->
             case inMsg of
@@ -112,6 +111,10 @@ update msg model =
 subscriptions : Model -> Sub Msg
 subscriptions _ =
     P.recv Recv PortError
+
+
+
+-- View
 
 
 view : Model -> Browser.Document Msg
@@ -131,18 +134,7 @@ body model =
             nextTasksView model
 
         Route.New ->
-            viewNewTask model
-
-
-viewNewTask : Model -> Html Msg
-viewNewTask model =
-    main_ []
-        [ Html.Styled.form
-            [ onSubmit <| CreateNewTask model.newTask ]
-            [ input [ type_ "text", placeholder "Summary", onInput <| NewTaskSummary, value model.newTask.summary ] []
-            , input [ type_ "submit" ] [ text "Create" ]
-            ]
-        ]
+            Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
 
 
 nextTasksView : Model -> Html Msg
