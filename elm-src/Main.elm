@@ -3,8 +3,25 @@ module Main exposing (main)
 import Browser
 import Browser.Navigation as Nav
 import Css exposing (..)
-import Html.Styled exposing (..)
-import Html.Styled.Attributes exposing (..)
+import Html.Styled
+    exposing
+        ( Html
+        , a
+        , button
+        , div
+        , form
+        , h1
+        , input
+        , label
+        , li
+        , main_
+        , nav
+        , p
+        , text
+        , toUnstyled
+        , ul
+        )
+import Html.Styled.Attributes exposing (css, for, href, id, placeholder, type_, value)
 import Html.Styled.Events exposing (onClick)
 import Ports as P
 import Route exposing (Route(..), parseRoute)
@@ -30,6 +47,7 @@ type alias Model =
     , newTask : Tasks.NewTask
     , error : Maybe String
     , route : Route
+    , auth : Maybe String
     }
 
 
@@ -43,6 +61,7 @@ init _ url key =
             }
       , error = Nothing
       , route = Route.parseRoute url
+      , auth = Nothing
       }
     , Cmd.none
     )
@@ -86,16 +105,13 @@ update msg model =
             let
                 ( newModel, cmd ) =
                     Tasks.update m model.newTask
-
-                tasks =
-                    case cmd of
-                        Tasks.None ->
-                            model.tasks
-
-                        Tasks.NewTaskCreated task ->
-                            Tasks.newTask model.tasks task
             in
-            ( { model | newTask = newModel, tasks = tasks }, Cmd.none )
+            case cmd of
+                Tasks.None ->
+                    ( { model | newTask = newModel }, Cmd.none )
+
+                Tasks.NewTaskCreated task ->
+                    ( { model | newTask = newModel, tasks = Tasks.newTask model.tasks task }, Cmd.none )
 
         Recv inMsg ->
             case inMsg of
@@ -129,12 +145,68 @@ view model =
 
 body : Model -> Html Msg
 body model =
+    div []
+        [ nav []
+            [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
+            , case model.auth of
+                Nothing ->
+                    a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
+
+                Just _ ->
+                    a [ href <| Route.encodeRoute Route.Home ] [ text "Logout" ]
+            ]
+        , content model
+        ]
+
+
+content : Model -> Html Msg
+content model =
     case model.route of
         Route.Home ->
             nextTasksView model
 
         Route.New ->
             Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
+
+        Route.Login ->
+            main_ []
+                [ form []
+                    [ h1 [] [ text "Login" ]
+                    , div []
+                        [ label [ for "username" ] [ text "Username" ]
+                        , input [ type_ "text", placeholder "joeSmith", id "username" ] []
+                        ]
+                    , div []
+                        [ label [ for "password" ] [ text "Password" ]
+                        , input [ type_ "password", id "password" ] []
+                        ]
+                    , button [ type_ "submit" ] [ text "Login" ]
+                    , p []
+                        [ text "Don't have an account?"
+                        , a [ href <| Route.encodeRoute Route.Register ] [ text "Register" ]
+                        ]
+                    ]
+                ]
+
+        Route.Register ->
+            main_ []
+                [ form []
+                    [ h1 [] [ text "Register" ]
+                    , div []
+                        [ label [ for "username" ] [ text "Username" ]
+                        , input [ type_ "text", placeholder "joeSmith", id "username" ] []
+                        ]
+                    , div []
+                        [ label [ for "password" ] [ text "Password" ]
+                        , input [ type_ "password", id "password" ] []
+                        ]
+                    , button [ type_ "submit" ] [ text "Register" ]
+                    , p []
+                        [ text "Already have an account?"
+                        , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
+                        ]
+                    ]
+                ]
 
 
 nextTasksView : Model -> Html Msg

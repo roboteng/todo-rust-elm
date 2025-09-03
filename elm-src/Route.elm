@@ -7,6 +7,8 @@ import Url.Parser exposing ((</>), Parser, int, map, oneOf, parse, s)
 type Route
     = Home
     | New
+    | Login
+    | Register
 
 
 parseRoute : Url.Url -> Route
@@ -19,6 +21,8 @@ routeParser =
     oneOf
         [ map Home (s "")
         , map New (s "new")
+        , map Login (s "login")
+        , map Register (s "register")
         ]
 
 
@@ -30,3 +34,9 @@ encodeRoute route =
 
         New ->
             "/new"
+
+        Login ->
+            "/login"
+
+        Register ->
+            "/register"
