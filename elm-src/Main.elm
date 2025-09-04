@@ -21,7 +21,18 @@ import Html.Styled
         , toUnstyled
         , ul
         )
-import Html.Styled.Attributes exposing (css, for, href, id, placeholder, type_, value)
+import Html.Styled.Attributes
+    exposing
+        ( attribute
+        , autocomplete
+        , css
+        , for
+        , href
+        , id
+        , placeholder
+        , type_
+        , value
+        )
 import Html.Styled.Events exposing (onClick)
 import Ports as P
 import Route exposing (Route(..), parseRoute)
@@ -169,44 +180,54 @@ content model =
             Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
 
         Route.Login ->
-            main_ []
-                [ form []
-                    [ h1 [] [ text "Login" ]
-                    , div []
-                        [ label [ for "username" ] [ text "Username" ]
-                        , input [ type_ "text", placeholder "joeSmith", id "username" ] []
-                        ]
-                    , div []
-                        [ label [ for "password" ] [ text "Password" ]
-                        , input [ type_ "password", id "password" ] []
-                        ]
-                    , button [ type_ "submit" ] [ text "Login" ]
-                    , p []
-                        [ text "Don't have an account?"
-                        , a [ href <| Route.encodeRoute Route.Register ] [ text "Register" ]
-                        ]
-                    ]
-                ]
+            viewLogin
 
         Route.Register ->
-            main_ []
-                [ form []
-                    [ h1 [] [ text "Register" ]
-                    , div []
-                        [ label [ for "username" ] [ text "Username" ]
-                        , input [ type_ "text", placeholder "joeSmith", id "username" ] []
-                        ]
-                    , div []
-                        [ label [ for "password" ] [ text "Password" ]
-                        , input [ type_ "password", id "password" ] []
-                        ]
-                    , button [ type_ "submit" ] [ text "Register" ]
-                    , p []
-                        [ text "Already have an account?"
-                        , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
-                        ]
-                    ]
+            viewRegister
+
+
+viewLogin : Html Msg
+viewLogin =
+    main_ []
+        [ form []
+            [ h1 [] [ text "Login" ]
+            , div []
+                [ label [ for "username" ] [ text "Username" ]
+                , input [ type_ "text", placeholder "joeSmith", id "username", attribute "autocomplete" "username" ] []
                 ]
+            , div []
+                [ label [ for "password" ] [ text "Password" ]
+                , input [ type_ "password", id "password", attribute "autocomplete" "current-password" ] []
+                ]
+            , button [ type_ "submit" ] [ text "Login" ]
+            , p []
+                [ text "Don't have an account?"
+                , a [ href <| Route.encodeRoute Route.Register ] [ text "Register" ]
+                ]
+            ]
+        ]
+
+
+viewRegister : Html Msg
+viewRegister =
+    main_ []
+        [ form []
+            [ h1 [] [ text "Register" ]
+            , div []
+                [ label [ for "username" ] [ text "Username" ]
+                , input [ type_ "text", placeholder "joeSmith", id "username", attribute "autocomplete" "username" ] []
+                ]
+            , div []
+                [ label [ for "password" ] [ text "Password" ]
+                , input [ type_ "password", id "password", attribute "autocomplete" "new-password" ] []
+                ]
+            , button [ type_ "submit" ] [ text "Register" ]
+            , p []
+                [ text "Already have an account?"
+                , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
+                ]
+            ]
+        ]
 
 
 nextTasksView : Model -> Html Msg
