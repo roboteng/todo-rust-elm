@@ -4,8 +4,9 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::StatusCode,
     response::IntoResponse,
-    routing::any,
+    routing::{any, post},
 };
 use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,7 @@ fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
             ServeDir::new(&assets_dir).fallback(ServeFile::new(assets_dir.join("index.html"))),
         )
         .route("/ws", any(ws_handler))
+        .route("/api/register", post(handle_register))
         .with_state(app_state)
         .layer(
             TraceLayer::new_for_http()
@@ -249,16 +251,24 @@ async fn process_message(
     ControlFlow::Continue(())
 }
 
+#[axum::debug_handler]
+async fn handle_register() -> impl IntoResponse {
+    StatusCode::CREATED
+}
+
 #[cfg(test)]
 mod tests {
+    use axum::http::StatusCode;
+    use axum_test::TestServer;
     use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
     use std::net::{Ipv4Addr, SocketAddr};
     use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 
     use super::*;
 
     #[tokio::test]
-    async fn test_websocket() {
+    async fn unit_websocket() {
         let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .unwrap();
@@ -317,20 +327,41 @@ mod tests {
             }
         }
 
-        // Second message should be our broadcasted update
-        if let Some(msg) = ws_stream.next().await {
-            let msg = msg.unwrap();
-            if let TungsteniteMessage::Text(text) = msg {
-                let response: OutMsg = serde_json::from_str(&text).unwrap();
-                match response {
-                    OutMsg::NewTasks(tasks) => {
-                        assert_eq!(tasks.tasks.len(), 1);
-                        assert_eq!(tasks.tasks[0].summary, "test");
-                        assert_eq!(tasks.tasks[0].id, 1);
-                        assert_eq!(tasks.next_id, 2);
-                    }
+        let msg = ws_stream
+            .next()
+            .await
+            .expect("Failed to receive message")
+            .expect("Failed to read message");
+        if let TungsteniteMessage::Text(text) = msg {
+            let response: OutMsg = serde_json::from_str(&text).unwrap();
+            match response {
+                OutMsg::NewTasks(tasks) => {
+                    assert_eq!(tasks.tasks.len(), 1);
+                    assert_eq!(tasks.tasks[0].summary, "test");
+                    assert_eq!(tasks.tasks[0].id, 1);
+                    assert_eq!(tasks.next_id, 2);
                 }
             }
+        } else {
+            panic!("Expected text message");
         }
+    }
+
+    #[tokio::test]
+    async fn unit_register() {
+        let temp = std::env::temp_dir();
+        let app_state = AppState::default();
+        let app = make_app(temp, app_state);
+
+        let server = TestServer::new(app).unwrap();
+
+        let request_body = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        let response = server.post("/api/register").json(&request_body).await;
+
+        response.assert_status(StatusCode::CREATED);
     }
 }
