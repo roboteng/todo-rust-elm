@@ -1,5 +1,5 @@
 use axum::{
-    Router,
+    Json, Router,
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -12,8 +12,8 @@ use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use std::ops::ControlFlow;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{ops::ControlFlow, sync::atomic::AtomicBool};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::{DefaultMakeSpan, TraceLayer},
@@ -32,6 +32,7 @@ type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
 struct AppState {
     tasks: Arc<Mutex<Tasks>>,
     clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
+    users: Arc<Mutex<bool>>,
 }
 
 pub struct Env {
@@ -251,9 +252,24 @@ async fn process_message(
     ControlFlow::Continue(())
 }
 
+#[derive(Debug, Deserialize)]
+struct RegisterRequest {
+    username: String,
+    password: String,
+}
+
 #[axum::debug_handler]
-async fn handle_register() -> impl IntoResponse {
-    StatusCode::CREATED
+async fn handle_register(
+    State(state): State<AppState>,
+    Json(_): Json<RegisterRequest>,
+) -> impl IntoResponse {
+    let mut k = state.users.lock().await;
+    if *k {
+        StatusCode::CONFLICT
+    } else {
+        *k = true;
+        StatusCode::CREATED
+    }
 }
 
 #[cfg(test)]
@@ -275,13 +291,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let temp = std::env::temp_dir();
-        let app_state = AppState {
-            tasks: Arc::new(Mutex::new(Tasks {
-                tasks: vec![],
-                next_id: 0,
-            })),
-            clients: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let app_state = AppState::default();
         let app = make_app(temp, app_state);
 
         // Spawn server in background
@@ -349,11 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn unit_register() {
-        let temp = std::env::temp_dir();
-        let app_state = AppState::default();
-        let app = make_app(temp, app_state);
-
-        let server = TestServer::new(app).unwrap();
+        let server = test_server();
 
         let request_body = json!({
             "username": "testuser",
@@ -363,5 +369,53 @@ mod tests {
         let response = server.post("/api/register").json(&request_body).await;
 
         response.assert_status(StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn unit_register_missing_username() {
+        let server = test_server();
+
+        let request_body = json!({
+            "password": "testpass"
+        });
+
+        let response = server.post("/api/register").json(&request_body).await;
+
+        response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn unit_register_missing_password() {
+        let server = test_server();
+
+        let request_body = json!({
+            "username": "testuser"
+        });
+
+        let response = server.post("/api/register").json(&request_body).await;
+
+        response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn unit_register_duplicate() {
+        let server = test_server();
+
+        let request_body = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        let _response1 = server.post("/api/register").json(&request_body).await;
+        let response2 = server.post("/api/register").json(&request_body).await;
+        response2.assert_status(StatusCode::CONFLICT);
+    }
+
+    fn test_server() -> TestServer {
+        let temp = std::env::temp_dir();
+        let app_state = AppState::default();
+        let app = make_app(temp, app_state);
+
+        TestServer::new(app).unwrap()
     }
 }
