@@ -12,8 +12,13 @@ use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
-use std::{ops::ControlFlow, sync::atomic::AtomicBool};
+use std::ops::ControlFlow;
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::{DefaultMakeSpan, TraceLayer},
@@ -32,7 +37,7 @@ type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
 struct AppState {
     tasks: Arc<Mutex<Tasks>>,
     clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
-    users: Arc<Mutex<bool>>,
+    users: Arc<Mutex<HashSet<String>>>,
 }
 
 pub struct Env {
@@ -261,13 +266,13 @@ struct RegisterRequest {
 #[axum::debug_handler]
 async fn handle_register(
     State(state): State<AppState>,
-    Json(_): Json<RegisterRequest>,
+    Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
-    let mut k = state.users.lock().await;
-    if *k {
+    let mut users = state.users.lock().await;
+    if users.contains(&req.username) {
         StatusCode::CONFLICT
     } else {
-        *k = true;
+        users.insert(req.username);
         StatusCode::CREATED
     }
 }
@@ -409,6 +414,25 @@ mod tests {
         let _response1 = server.post("/api/register").json(&request_body).await;
         let response2 = server.post("/api/register").json(&request_body).await;
         response2.assert_status(StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn unit_two_registers() {
+        let server = test_server();
+
+        let request_body1 = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        let request_body2 = json!({
+            "username": "testuser2",
+            "password": "testpass2"
+        });
+
+        let _response1 = server.post("/api/register").json(&request_body1).await;
+        let response2 = server.post("/api/register").json(&request_body2).await;
+        response2.assert_status(StatusCode::CREATED);
     }
 
     fn test_server() -> TestServer {

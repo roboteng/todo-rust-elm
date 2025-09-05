@@ -66,7 +66,11 @@ type alias Model =
 
 type Auth
     = LoggedIn String
-    | LoggedOut { username : String, password : String }
+    | LoggedOut
+        { username : String
+        , password : String
+        , error : Maybe String
+        }
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -79,7 +83,7 @@ init _ url key =
             }
       , error = Nothing
       , route = Route.parseRoute url
-      , auth = LoggedOut { username = "", password = "" }
+      , auth = LoggedOut { username = "", password = "", error = Nothing }
       }
     , Cmd.none
     )
@@ -147,7 +151,7 @@ update msg model =
             ( { model | error = Just e }, Cmd.none )
 
         Register username password ->
-            ( { model | auth = LoggedOut { username = "", password = "" } }
+            ( { model | auth = LoggedOut { username = "", password = "", error = Nothing } }
             , Http.post
                 { url = "/api/register"
                 , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string username ), ( "password", Encode.string password ) ]
@@ -175,7 +179,22 @@ update msg model =
                     ( { model | auth = LoggedOut { m | password = password } }, Cmd.none )
 
         RegisterResponse response ->
-            ( model, Cmd.none )
+            case response of
+                Ok _ ->
+                    ( model, Cmd.none )
+
+                Err e ->
+                    case e of
+                        Http.BadStatus 409 ->
+                            case model.auth of
+                                LoggedOut m ->
+                                    ( { model | auth = LoggedOut { m | error = Just "Username already taken" } }, Cmd.none )
+
+                                LoggedIn _ ->
+                                    ( model, Cmd.none )
+
+                        _ ->
+                            ( model, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
@@ -258,7 +277,7 @@ viewLogin =
         ]
 
 
-viewRegister : { username : String, password : String } -> Html Msg
+viewRegister : { username : String, password : String, error : Maybe String } -> Html Msg
 viewRegister model =
     main_ []
         [ form
@@ -266,7 +285,8 @@ viewRegister model =
             ]
             [ h1 [] [ text "Register" ]
             , div []
-                [ label [ for "username" ] [ text "Username" ]
+                [ text <| Maybe.withDefault "" model.error
+                , label [ for "username" ] [ text "Username" ]
                 , input
                     [ type_ "text"
                     , placeholder "joeSmith"
