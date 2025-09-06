@@ -141,7 +141,7 @@ update msg model =
                             New
 
                         Route.Register ->
-                            Register { username = "", password = "", error = Nothing }
+                            Register Register.init
 
                         Route.Login ->
                             Login { username = "", password = "", error = Nothing }
@@ -181,22 +181,10 @@ update msg model =
             case model.page of
                 Register mdl ->
                     let
-                        ( newModel, outCmd ) =
+                        ( newModel, cmd ) =
                             Register.update m mdl
-
-                        cmd =
-                            case outCmd of
-                                Register.None ->
-                                    Cmd.none
-
-                                Register.Register username password ->
-                                    Http.post
-                                        { url = "/api/register"
-                                        , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string username ), ( "password", Encode.string password ) ]
-                                        , expect = Http.expectJson (Register.Response >> RegisterMsg) Decode.string
-                                        }
                     in
-                    ( { model | page = Register newModel }, cmd )
+                    ( { model | page = Register newModel }, Cmd.map RegisterMsg cmd )
 
                 _ ->
                     ( model, Cmd.none )

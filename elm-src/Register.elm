@@ -1,4 +1,4 @@
-module Register exposing (Model, Msg(..), OutCmd(..), init, update, view)
+module Register exposing (Model, Msg(..), init, update, view)
 
 import Html.Styled
     exposing
@@ -27,14 +27,17 @@ import Html.Styled.Attributes
         )
 import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
+import Json.Encode as Encode
 import Route
 
 
-type alias Model =
-    { username : String
-    , password : String
-    , error : Maybe String
-    }
+type Model
+    = M
+        { username : String
+        , password : String
+        , error : Maybe String
+        }
 
 
 type Msg
@@ -44,45 +47,47 @@ type Msg
     | Response (Result Http.Error String)
 
 
-type OutCmd
-    = Register String String
-    | None
-
-
 init : Model
 init =
-    { username = ""
-    , password = ""
-    , error = Nothing
-    }
+    M
+        { username = ""
+        , password = ""
+        , error = Nothing
+        }
 
 
-update : Msg -> Model -> ( Model, OutCmd )
-update msg model =
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg (M model) =
     case msg of
         UpdateUsername username ->
-            ( { model | username = username }, None )
+            ( M { model | username = username }, Cmd.none )
 
         UpdatePassword password ->
-            ( { model | password = password }, None )
+            ( M { model | password = password }, Cmd.none )
 
         Submit ->
-            ( init, Register model.username model.password )
+            ( init
+            , Http.post
+                { url = "/api/register"
+                , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string model.username ), ( "password", Encode.string model.password ) ]
+                , expect = Http.expectJson Response Decode.string
+                }
+            )
 
         Response result ->
             case result of
                 Ok _ ->
-                    ( { model | error = Nothing }, None )
+                    ( M { model | error = Nothing }, Cmd.none )
 
                 Err (Http.BadStatus 409) ->
-                    ( { model | error = Just "Username already exsists" }, None )
+                    ( M { model | error = Just "Username already exsists, pick a different one" }, Cmd.none )
 
                 Err error ->
-                    ( { model | error = Just "Some error occurred" }, None )
+                    ( M { model | error = Just "Some error occurred" }, Cmd.none )
 
 
 view : Model -> Html Msg
-view model =
+view (M model) =
     main_ []
         [ form
             [ onSubmit <| Submit
