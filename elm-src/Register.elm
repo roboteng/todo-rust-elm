@@ -36,7 +36,7 @@ type Model
     = M
         { username : String
         , password : String
-        , error : Maybe String
+        , message : Maybe String
         }
 
 
@@ -52,7 +52,7 @@ init =
     M
         { username = ""
         , password = ""
-        , error = Nothing
+        , message = Nothing
         }
 
 
@@ -77,13 +77,13 @@ update msg (M model) =
         Response result ->
             case result of
                 Ok _ ->
-                    ( M { model | error = Nothing }, Cmd.none )
+                    ( M { model | message = Nothing }, Cmd.none )
 
                 Err (Http.BadStatus 409) ->
-                    ( M { model | error = Just "Username already exsists, pick a different one" }, Cmd.none )
+                    ( M { model | message = Just "Username already exsists, pick a different one" }, Cmd.none )
 
                 Err error ->
-                    ( M { model | error = Just "Some error occurred" }, Cmd.none )
+                    ( M { model | message = Just "Some error occurred" }, Cmd.none )
 
 
 view : Model -> Html Msg
@@ -94,7 +94,7 @@ view (M model) =
             ]
             [ h1 [] [ text "Register" ]
             , div []
-                [ text <| Maybe.withDefault "" model.error
+                [ text <| Maybe.withDefault "" model.message
                 , label [ for "username" ] [ text "Username" ]
                 , input
                     [ type_ "text"

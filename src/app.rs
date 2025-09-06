@@ -6,19 +6,14 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{any, post},
+    routing::{any, get, post},
 };
 use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use std::ops::ControlFlow;
-use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::{DefaultMakeSpan, TraceLayer},
@@ -37,7 +32,7 @@ type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
 struct AppState {
     tasks: Arc<Mutex<Tasks>>,
     clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
-    users: Arc<Mutex<HashSet<String>>>,
+    users: Arc<Mutex<HashMap<String, String>>>,
 }
 
 pub struct Env {
@@ -71,6 +66,7 @@ fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
         )
         .route("/ws", any(ws_handler))
         .route("/api/register", post(handle_register))
+        .route("/api/login", get(handle_login))
         .with_state(app_state)
         .layer(
             TraceLayer::new_for_http()
@@ -269,11 +265,28 @@ async fn handle_register(
     Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     let mut users = state.users.lock().await;
-    if users.contains(&req.username) {
+    if users.contains_key(&req.username) {
         StatusCode::CONFLICT
     } else {
-        users.insert(req.username);
+        users.insert(req.username, req.password);
         StatusCode::CREATED
+    }
+}
+
+#[axum::debug_handler]
+async fn handle_login(
+    State(state): State<AppState>,
+    Json(req): Json<RegisterRequest>,
+) -> impl IntoResponse {
+    let users = state.users.lock().await;
+    if let Some(password) = users.get(&req.username) {
+        if *password == req.password {
+            StatusCode::OK
+        } else {
+            StatusCode::UNAUTHORIZED
+        }
+    } else {
+        StatusCode::UNAUTHORIZED
     }
 }
 
@@ -441,5 +454,54 @@ mod tests {
         let app = make_app(temp, app_state);
 
         TestServer::new(app).unwrap()
+    }
+
+    #[tokio::test]
+    async fn unit_login() {
+        let server = test_server();
+
+        let request_body = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+        server.post("/api/register").json(&request_body).await;
+
+        let response = server.get("/api/login").json(&request_body).await;
+
+        response.assert_status(StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn unit_no_register_login() {
+        let server = test_server();
+
+        let request_body = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        let response = server.get("/api/login").json(&request_body).await;
+
+        response.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn unit_login_bad_password() {
+        let server = test_server();
+
+        let register_body = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        let login_body = json!({
+            "username": "testuser",
+            "password": "bad_password"
+        });
+
+        server.post("/api/register").json(&register_body).await;
+        let response = server.get("/api/login").json(&login_body).await;
+
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
 }
