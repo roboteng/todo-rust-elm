@@ -36,6 +36,7 @@ import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Login
 import Ports as P
 import Register
 import Route exposing (Route(..), parseRoute)
@@ -68,14 +69,7 @@ type Page
     = Home
     | New
     | Register Register.Model
-    | Login LoginModel
-
-
-type alias LoginModel =
-    { username : String
-    , password : String
-    , error : Maybe String
-    }
+    | Login Login.Model
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -99,7 +93,7 @@ init _ url key =
                     Register Register.init
 
                 Route.Login ->
-                    Login { username = "", password = "", error = Nothing }
+                    Login Login.init
       }
     , Cmd.none
     )
@@ -114,6 +108,7 @@ type Msg
     | Recv P.InMessage
     | PortError String
     | RegisterMsg Register.Msg
+    | LoginMsg Login.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -144,7 +139,7 @@ update msg model =
                             Register Register.init
 
                         Route.Login ->
-                            Login { username = "", password = "", error = Nothing }
+                            Login Login.init
             in
             ( { model | page = page }
             , Cmd.none
@@ -189,6 +184,18 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        LoginMsg m ->
+            case model.page of
+                Login mdl ->
+                    let
+                        ( newModel, cmd ) =
+                            Login.update m mdl
+                    in
+                    ( { model | page = Login newModel }, Cmd.map LoginMsg cmd )
+
+                _ ->
+                    ( model, Cmd.none )
+
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
@@ -229,35 +236,11 @@ content model =
         New ->
             Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
 
-        Login _ ->
-            viewLogin
+        Login m ->
+            Html.Styled.map LoginMsg <| Login.view m
 
         Register m ->
             Html.Styled.map RegisterMsg <| Register.view m
-
-
-viewLogin : Html Msg
-viewLogin =
-    main_ []
-        [ form
-            [ onSubmit <| None
-            ]
-            [ h1 [] [ text "Login" ]
-            , div []
-                [ label [ for "username" ] [ text "Username" ]
-                , input [ type_ "text", placeholder "joeSmith", id "username", attribute "autocomplete" "username" ] []
-                ]
-            , div []
-                [ label [ for "password" ] [ text "Password" ]
-                , input [ type_ "password", id "password", attribute "autocomplete" "current-password" ] []
-                ]
-            , button [ type_ "submit" ] [ text "Login" ]
-            , p []
-                [ text "Don't have an account?"
-                , a [ href <| Route.encodeRoute <| Route.Register ] [ text "Register" ]
-                ]
-            ]
-        ]
 
 
 nextTasksView : Model -> Html Msg

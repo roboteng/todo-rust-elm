@@ -1,4 +1,4 @@
-module Register exposing (Model, Msg(..), init, update, view)
+module Login exposing (Model, Msg(..), init, update, view)
 
 import Html.Styled
     exposing
@@ -68,7 +68,7 @@ update msg (M model) =
         Submit ->
             ( init
             , Http.post
-                { url = "/api/register"
+                { url = "/api/login"
                 , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string model.username ), ( "password", Encode.string model.password ) ]
                 , expect = Http.expectWhatever Response
                 }
@@ -77,10 +77,10 @@ update msg (M model) =
         Response result ->
             case result of
                 Ok _ ->
-                    ( M { model | message = Just "Account Created" }, Cmd.none )
+                    ( M { model | message = Just "You're now logged in!" }, Cmd.none )
 
-                Err (Http.BadStatus 409) ->
-                    ( M { model | message = Just "Username already exists, pick a different one" }, Cmd.none )
+                Err (Http.BadStatus 401) ->
+                    ( M { model | message = Just "Incorrect Credentials" }, Cmd.none )
 
                 Err _ ->
                     ( M { model | message = Just "Some error occurred" }, Cmd.none )
@@ -92,7 +92,7 @@ view (M model) =
         [ form
             [ onSubmit <| Submit
             ]
-            [ h1 [] [ text "Register" ]
+            [ h1 [] [ text "Login" ]
             , div []
                 [ text <| Maybe.withDefault "" model.message
                 , label [ for "username" ] [ text "Username" ]
@@ -111,16 +111,16 @@ view (M model) =
                 , input
                     [ type_ "password"
                     , id "password"
-                    , attribute "autocomplete" "new-password"
+                    , attribute "autocomplete" "current-password"
                     , value model.password
                     , onInput <| UpdatePassword
                     ]
                     []
                 ]
-            , button [ type_ "submit" ] [ text "Register" ]
+            , button [ type_ "submit" ] [ text "Login" ]
             , p []
-                [ text "Already have an account?"
-                , a [ href <| Route.encodeRoute <| Route.Login ] [ text "Login" ]
+                [ text "Don't have an account?"
+                , a [ href <| Route.encodeRoute <| Route.Register ] [ text "Register" ]
                 ]
             ]
         ]

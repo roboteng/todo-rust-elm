@@ -1,12 +1,13 @@
 use axum::{
     Json, Router,
+    body::Body,
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
-    response::IntoResponse,
-    routing::{any, get, post},
+    response::{IntoResponse, Response},
+    routing::{any, post},
 };
 use axum_extra::{TypedHeader, headers};
 use serde::{Deserialize, Serialize};
@@ -66,7 +67,7 @@ fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
         )
         .route("/ws", any(ws_handler))
         .route("/api/register", post(handle_register))
-        .route("/api/login", get(handle_login))
+        .route("/api/login", post(handle_login))
         .with_state(app_state)
         .layer(
             TraceLayer::new_for_http()
@@ -274,19 +275,23 @@ async fn handle_register(
 }
 
 #[axum::debug_handler]
-async fn handle_login(
-    State(state): State<AppState>,
-    Json(req): Json<RegisterRequest>,
-) -> impl IntoResponse {
+async fn handle_login(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> Response {
     let users = state.users.lock().await;
     if let Some(password) = users.get(&req.username) {
         if *password == req.password {
-            StatusCode::OK
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(
+                    "Set-Cookie",
+                    "session=123; HttpOnly; Secure; SameSite=Strict; Path=/;",
+                )
+                .body(Body::empty())
+                .unwrap()
         } else {
-            StatusCode::UNAUTHORIZED
+            StatusCode::UNAUTHORIZED.into_response()
         }
     } else {
-        StatusCode::UNAUTHORIZED
+        StatusCode::UNAUTHORIZED.into_response()
     }
 }
 
@@ -466,9 +471,10 @@ mod tests {
         });
         server.post("/api/register").json(&request_body).await;
 
-        let response = server.get("/api/login").json(&request_body).await;
+        let response = server.post("/api/login").json(&request_body).await;
 
         response.assert_status(StatusCode::OK);
+        response.cookies().get("session").expect("Cookie not found");
     }
 
     #[tokio::test]
@@ -480,7 +486,7 @@ mod tests {
             "password": "testpass"
         });
 
-        let response = server.get("/api/login").json(&request_body).await;
+        let response = server.post("/api/login").json(&request_body).await;
 
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
@@ -500,7 +506,7 @@ mod tests {
         });
 
         server.post("/api/register").json(&register_body).await;
-        let response = server.get("/api/login").json(&login_body).await;
+        let response = server.post("/api/login").json(&login_body).await;
 
         response.assert_status(StatusCode::UNAUTHORIZED);
     }
