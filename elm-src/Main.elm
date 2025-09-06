@@ -2,7 +2,7 @@ module Main exposing (main)
 
 import Browser
 import Browser.Navigation as Nav
-import Css exposing (..)
+import Css exposing (listStyleType, none)
 import Html.Styled
     exposing
         ( Html
@@ -37,6 +37,7 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Ports as P
+import Register
 import Route exposing (Route(..), parseRoute)
 import Tasks
 import Url
@@ -59,18 +60,22 @@ type alias Model =
     , tasks : Tasks.Tasks
     , newTask : Tasks.NewTask
     , error : Maybe String
-    , route : Route
-    , auth : Auth
+    , page : Page
     }
 
 
-type Auth
-    = LoggedIn String
-    | LoggedOut
-        { username : String
-        , password : String
-        , error : Maybe String
-        }
+type Page
+    = Home
+    | New
+    | Register Register.Model
+    | Login LoginModel
+
+
+type alias LoginModel =
+    { username : String
+    , password : String
+    , error : Maybe String
+    }
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -82,8 +87,19 @@ init _ url key =
             { summary = ""
             }
       , error = Nothing
-      , route = Route.parseRoute url
-      , auth = LoggedOut { username = "", password = "", error = Nothing }
+      , page =
+            case Route.parseRoute url of
+                Route.Home ->
+                    Home
+
+                Route.New ->
+                    New
+
+                Route.Register ->
+                    Register Register.init
+
+                Route.Login ->
+                    Login { username = "", password = "", error = Nothing }
       }
     , Cmd.none
     )
@@ -97,11 +113,7 @@ type Msg
     | NewTaskMsg Tasks.Msg
     | Recv P.InMessage
     | PortError String
-    | Register String String
-    | RegisterResponse (Result Http.Error String)
-    | Login String String
-    | UpdateUsername String
-    | UpdatePassword String
+    | RegisterMsg Register.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -119,7 +131,22 @@ update msg model =
                     ( model, Nav.load href )
 
         UrlChanged url ->
-            ( { model | route = parseRoute url }
+            let
+                page =
+                    case parseRoute url of
+                        Route.Home ->
+                            Home
+
+                        Route.New ->
+                            New
+
+                        Route.Register ->
+                            Register { username = "", password = "", error = Nothing }
+
+                        Route.Login ->
+                            Login { username = "", password = "", error = Nothing }
+            in
+            ( { model | page = page }
             , Cmd.none
             )
 
@@ -150,51 +177,29 @@ update msg model =
         PortError e ->
             ( { model | error = Just e }, Cmd.none )
 
-        Register username password ->
-            ( { model | auth = LoggedOut { username = "", password = "", error = Nothing } }
-            , Http.post
-                { url = "/api/register"
-                , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string username ), ( "password", Encode.string password ) ]
-                , expect = Http.expectJson RegisterResponse Decode.string
-                }
-            )
+        RegisterMsg m ->
+            case model.page of
+                Register mdl ->
+                    let
+                        ( newModel, outCmd ) =
+                            Register.update m mdl
 
-        Login username password ->
-            ( model, Cmd.none )
+                        cmd =
+                            case outCmd of
+                                Register.None ->
+                                    Cmd.none
 
-        UpdateUsername username ->
-            case model.auth of
-                LoggedIn _ ->
+                                Register.Register username password ->
+                                    Http.post
+                                        { url = "/api/register"
+                                        , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string username ), ( "password", Encode.string password ) ]
+                                        , expect = Http.expectJson (Register.Response >> RegisterMsg) Decode.string
+                                        }
+                    in
+                    ( { model | page = Register newModel }, cmd )
+
+                _ ->
                     ( model, Cmd.none )
-
-                LoggedOut m ->
-                    ( { model | auth = LoggedOut { m | username = username } }, Cmd.none )
-
-        UpdatePassword password ->
-            case model.auth of
-                LoggedIn _ ->
-                    ( model, Cmd.none )
-
-                LoggedOut m ->
-                    ( { model | auth = LoggedOut { m | password = password } }, Cmd.none )
-
-        RegisterResponse response ->
-            case response of
-                Ok _ ->
-                    ( model, Cmd.none )
-
-                Err e ->
-                    case e of
-                        Http.BadStatus 409 ->
-                            case model.auth of
-                                LoggedOut m ->
-                                    ( { model | auth = LoggedOut { m | error = Just "Username already taken" } }, Cmd.none )
-
-                                LoggedIn _ ->
-                                    ( model, Cmd.none )
-
-                        _ ->
-                            ( model, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
@@ -221,12 +226,7 @@ body model =
     div []
         [ nav []
             [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
-            , case model.auth of
-                LoggedOut _ ->
-                    a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
-
-                LoggedIn _ ->
-                    a [ href <| Route.encodeRoute Route.Home ] [ text "Logout" ]
+            , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
             ]
         , content model
         ]
@@ -234,30 +234,25 @@ body model =
 
 content : Model -> Html Msg
 content model =
-    case model.route of
-        Route.Home ->
+    case model.page of
+        Home ->
             nextTasksView model
 
-        Route.New ->
+        New ->
             Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
 
-        Route.Login ->
+        Login _ ->
             viewLogin
 
-        Route.Register ->
-            case model.auth of
-                LoggedIn _ ->
-                    text "You are already logged in"
-
-                LoggedOut m ->
-                    viewRegister m
+        Register m ->
+            Html.Styled.map RegisterMsg <| Register.view m
 
 
 viewLogin : Html Msg
 viewLogin =
     main_ []
         [ form
-            [ onSubmit <| Login "" ""
+            [ onSubmit <| None
             ]
             [ h1 [] [ text "Login" ]
             , div []
@@ -272,46 +267,6 @@ viewLogin =
             , p []
                 [ text "Don't have an account?"
                 , a [ href <| Route.encodeRoute <| Route.Register ] [ text "Register" ]
-                ]
-            ]
-        ]
-
-
-viewRegister : { username : String, password : String, error : Maybe String } -> Html Msg
-viewRegister model =
-    main_ []
-        [ form
-            [ onSubmit <| Register model.username model.password
-            ]
-            [ h1 [] [ text "Register" ]
-            , div []
-                [ text <| Maybe.withDefault "" model.error
-                , label [ for "username" ] [ text "Username" ]
-                , input
-                    [ type_ "text"
-                    , placeholder "joeSmith"
-                    , id "username"
-                    , attribute "autocomplete" "username"
-                    , value model.username
-                    , onInput <| UpdateUsername
-                    ]
-                    []
-                ]
-            , div []
-                [ label [ for "password" ] [ text "Password" ]
-                , input
-                    [ type_ "password"
-                    , id "password"
-                    , attribute "autocomplete" "new-password"
-                    , value model.password
-                    , onInput <| UpdatePassword
-                    ]
-                    []
-                ]
-            , button [ type_ "submit" ] [ text "Register" ]
-            , p []
-                [ text "Already have an account?"
-                , a [ href <| Route.encodeRoute <| Route.Login ] [ text "Login" ]
                 ]
             ]
         ]
