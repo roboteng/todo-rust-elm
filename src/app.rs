@@ -266,11 +266,11 @@ async fn handle_register(
     Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     let mut users = state.users.lock().await;
-    if users.contains_key(&req.username) {
-        StatusCode::CONFLICT
-    } else {
-        users.insert(req.username, req.password);
+    if let std::collections::hash_map::Entry::Vacant(e) = users.entry(req.username) {
+        e.insert(req.password);
         StatusCode::CREATED
+    } else {
+        StatusCode::CONFLICT
     }
 }
 
@@ -328,7 +328,7 @@ mod tests {
         });
 
         // Connect WebSocket client
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
         // Test sending tasks message
