@@ -267,32 +267,31 @@ async fn handle_register(
     Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     let mut users = state.users.lock().await;
-    if let Entry::Vacant(e) = users.find(req.username) {
-        e.insert(UserData::new(req.password));
-        StatusCode::CREATED
-    } else {
-        StatusCode::CONFLICT
+    match users.try_add(UserData::new(req.username, req.password)) {
+        Some(_) => StatusCode::CREATED,
+        None => StatusCode::CONFLICT,
     }
 }
 
 #[axum::debug_handler]
 async fn handle_login(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> Response {
     let users = state.users.lock().await;
-    if let Some(user) = users.get(req.username) {
-        if user.matches_password(&req.password) {
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(
-                    "Set-Cookie",
-                    "session=123; HttpOnly; Secure; SameSite=Strict; Path=/;",
-                )
-                .body(Body::empty())
-                .unwrap()
-        } else {
-            StatusCode::UNAUTHORIZED.into_response()
+    match users.get(req.username) {
+        Some(user) => {
+            if user.matches_password(&req.password) {
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(
+                        "Set-Cookie",
+                        "session=123; HttpOnly; Secure; SameSite=Strict; Path=/;",
+                    )
+                    .body(Body::empty())
+                    .unwrap()
+            } else {
+                StatusCode::UNAUTHORIZED.into_response()
+            }
         }
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
+        _ => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
 
