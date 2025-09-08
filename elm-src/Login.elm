@@ -1,4 +1,4 @@
-module Login exposing (Model, Msg(..), init, update, view)
+module Login exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 import Html.Styled
     exposing
@@ -47,6 +47,11 @@ type Msg
     | Response (Result Http.Error ())
 
 
+type OutMsg
+    = LoggedIn
+    | None
+
+
 init : Model
 init =
     M
@@ -56,14 +61,14 @@ init =
         }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg (M model) =
     case msg of
         UpdateUsername username ->
-            ( M { model | username = username }, Cmd.none )
+            ( M { model | username = username }, Cmd.none, None )
 
         UpdatePassword password ->
-            ( M { model | password = password }, Cmd.none )
+            ( M { model | password = password }, Cmd.none, None )
 
         Submit ->
             ( init
@@ -72,18 +77,19 @@ update msg (M model) =
                 , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string model.username ), ( "password", Encode.string model.password ) ]
                 , expect = Http.expectWhatever Response
                 }
+            , None
             )
 
         Response result ->
             case result of
                 Ok _ ->
-                    ( M { model | message = Just "You're now logged in!" }, Cmd.none )
+                    ( M { model | message = Just "You're now logged in!" }, Cmd.none, LoggedIn )
 
                 Err (Http.BadStatus 401) ->
-                    ( M { model | message = Just "Incorrect Credentials" }, Cmd.none )
+                    ( M { model | message = Just "Incorrect Credentials" }, Cmd.none, None )
 
                 Err _ ->
-                    ( M { model | message = Just "Some error occurred" }, Cmd.none )
+                    ( M { model | message = Just "Some error occurred" }, Cmd.none, None )
 
 
 view : Model -> Html Msg

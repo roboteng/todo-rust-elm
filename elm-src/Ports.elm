@@ -1,4 +1,4 @@
-port module Ports exposing (InMessage(..), OutMessage(..), decodeIncomingMessage, recv, send)
+port module Ports exposing (InMessage(..), OutMessage(..), connectWebsocket, decodeIncomingMessage, recv, send)
 
 import Json.Decode exposing (errorToString, field, map2)
 import Json.Encode exposing (Value, object, string)
@@ -9,6 +9,9 @@ port sendMessage : Value -> Cmd msg
 
 
 port recvMessage : (Value -> msg) -> Sub msg
+
+
+port connectWebsocket : Bool -> Cmd msg
 
 
 type OutMessage

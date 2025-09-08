@@ -1,36 +1,50 @@
 <!doctype html>
 <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="stylesheet" href="styles.css" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Rust-Elm App</title>
+    </head>
 
-<head>
-  <meta charset="UTF-8" />
-  <link rel="stylesheet" href="styles.css" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rust-Elm App</title>
-</head>
+    <body>
+        <div id="app"></div>
 
-<body>
-  <div id="app"></div>
-
-  <script src="elm.js"></script>
-  <script>
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`)
-    var app = Elm.Main.init({
-      node: document.getElementById('app')
-    });
-    app.ports.sendMessage.subscribe((msg) => {
-      console.log(`sending ${typeof msg}`, msg)
-      socket.send(JSON.stringify(msg))
-    })
-    socket.addEventListener('message', (msg) => {
-      const data = JSON.parse(msg.data);
-      console.log(`recv'ed ${typeof data}`, data);
-      app.ports.recvMessage.send(data)
-    })
-    socket.addEventListener('open', (e) => console.log("open", e))
-    socket.addEventListener('close', (e) => console.log("close", e))
-    socket.addEventListener('error', () => console.warn("error", e))
-  </script>
-</body>
-
+        <script src="elm.js"></script>
+        <script>
+            const wsProtocol =
+                window.location.protocol === "https:" ? "wss:" : "ws:";
+            var socket;
+            var app = Elm.Main.init({
+                node: document.getElementById("app"),
+            });
+            app.ports.sendMessage.subscribe((msg) => {
+                console.log(`sending ${typeof msg}`, msg);
+                socket?.send(JSON.stringify(msg));
+            });
+            app.ports.connectWebsocket.subscribe((connect) => {
+                if (connect) {
+                    socket = new WebSocket(
+                        `${wsProtocol}//${window.location.host}/ws`,
+                    );
+                    socket.addEventListener("message", (msg) => {
+                        const data = JSON.parse(msg.data);
+                        console.log(`recv'ed ${typeof data}`, data);
+                        app.ports.recvMessage.send(data);
+                    });
+                    socket.addEventListener("open", (e) =>
+                        console.log("open", e),
+                    );
+                    socket.addEventListener("close", (e) =>
+                        console.log("close", e),
+                    );
+                    socket.addEventListener("error", () =>
+                        console.warn("error", e),
+                    );
+                } else {
+                    socket = null;
+                }
+            });
+        </script>
+    </body>
 </html>

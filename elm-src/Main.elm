@@ -9,35 +9,17 @@ import Html.Styled
         , a
         , button
         , div
-        , form
-        , h1
-        , input
-        , label
         , li
         , main_
         , nav
-        , p
         , text
         , toUnstyled
         , ul
         )
-import Html.Styled.Attributes
-    exposing
-        ( attribute
-        , css
-        , for
-        , href
-        , id
-        , placeholder
-        , type_
-        , value
-        )
-import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
-import Http
-import Json.Decode as Decode
-import Json.Encode as Encode
+import Html.Styled.Attributes exposing (css, href)
+import Html.Styled.Events exposing (onClick)
 import Login
-import Ports as P
+import Ports as P exposing (connectWebsocket)
 import Register
 import Route exposing (Route(..), parseRoute)
 import Tasks
@@ -62,6 +44,7 @@ type alias Model =
     , newTask : Tasks.NewTask
     , error : Maybe String
     , page : Page
+    , loggedIn : Bool
     }
 
 
@@ -94,8 +77,9 @@ init _ url key =
 
                 Route.Login ->
                     Login Login.init
+      , loggedIn = False
       }
-    , Cmd.none
+    , P.connectWebsocket False
     )
 
 
@@ -109,6 +93,7 @@ type Msg
     | PortError String
     | RegisterMsg Register.Msg
     | LoginMsg Login.Msg
+    | LoggedIn
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -188,18 +173,31 @@ update msg model =
             case model.page of
                 Login mdl ->
                     let
-                        ( newModel, cmd ) =
+                        ( newModel, cmd, outMsg ) =
                             Login.update m mdl
                     in
-                    ( { model | page = Login newModel }, Cmd.map LoginMsg cmd )
+                    ( { model
+                        | page = Login newModel
+                        , loggedIn = outMsg == Login.LoggedIn
+                      }
+                    , Cmd.batch [ Cmd.map LoginMsg cmd, connectWebsocket <| outMsg == Login.LoggedIn ]
+                    )
 
                 _ ->
                     ( model, Cmd.none )
 
+        LoggedIn ->
+            ( { model | loggedIn = True }, Cmd.none )
+
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    P.recv Recv PortError
+subscriptions model =
+    case model.loggedIn of
+        True ->
+            P.recv Recv PortError
+
+        False ->
+            Sub.none
 
 
 
