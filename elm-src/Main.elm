@@ -9,6 +9,7 @@ import Html.Styled
         , a
         , button
         , div
+        , input
         , li
         , main_
         , nav
@@ -16,7 +17,7 @@ import Html.Styled
         , toUnstyled
         , ul
         )
-import Html.Styled.Attributes exposing (css, href)
+import Html.Styled.Attributes exposing (css, href, type_)
 import Html.Styled.Events exposing (onClick)
 import Login
 import Ports as P exposing (connectWebsocket)
@@ -93,7 +94,7 @@ type Msg
     | PortError String
     | RegisterMsg Register.Msg
     | LoginMsg Login.Msg
-    | LoggedIn
+    | Logout
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -175,19 +176,22 @@ update msg model =
                     let
                         ( newModel, cmd, outMsg ) =
                             Login.update m mdl
+
+                        loggedIn =
+                            outMsg == Login.LoggedIn
                     in
                     ( { model
                         | page = Login newModel
-                        , loggedIn = outMsg == Login.LoggedIn
+                        , loggedIn = loggedIn
                       }
-                    , Cmd.batch [ Cmd.map LoginMsg cmd, connectWebsocket <| outMsg == Login.LoggedIn ]
+                    , Cmd.batch [ Cmd.map LoginMsg cmd, connectWebsocket loggedIn ]
                     )
 
                 _ ->
                     ( model, Cmd.none )
 
-        LoggedIn ->
-            ( { model | loggedIn = True }, Cmd.none )
+        Logout ->
+            ( { model | loggedIn = False }, connectWebsocket False )
 
 
 subscriptions : Model -> Sub Msg
@@ -217,10 +221,17 @@ view model =
 body : Model -> Html Msg
 body model =
     div []
-        [ nav []
-            [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
-            , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
-            ]
+        [ nav [] <|
+            case model.loggedIn of
+                True ->
+                    [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
+                    , button [ onClick Logout ] [ text "Logout" ]
+                    ]
+
+                False ->
+                    [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
+                    , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
+                    ]
         , content model
         ]
 
@@ -243,12 +254,23 @@ content model =
 
 nextTasksView : Model -> Html Msg
 nextTasksView model =
-    main_ []
-        [ ul [ css [ listStyleType none ] ]
-            (List.map
-                (\task -> li [] [ text task.summary ])
-                model.tasks.tasks
-            )
-        , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
-        , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
-        ]
+    main_ [] <|
+        case model.loggedIn of
+            True ->
+                [ ul [ css [ listStyleType none ] ]
+                    (List.map
+                        (\task -> li [] [ text task.summary ])
+                        model.tasks.tasks
+                    )
+                , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
+                , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
+                ]
+
+            False ->
+                [ ul [ css [ listStyleType none ] ]
+                    (List.map
+                        (\task -> li [] [ text task.summary ])
+                        model.tasks.tasks
+                    )
+                , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
+                ]

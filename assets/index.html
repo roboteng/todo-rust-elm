@@ -42,6 +42,7 @@
                         console.warn("error", e),
                     );
                 } else {
+                    socket?.close();
                     socket = null;
                 }
             });
