@@ -3,6 +3,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::app::*;
 
 mod app;
+mod auth;
 
 #[tokio::main]
 async fn main() {

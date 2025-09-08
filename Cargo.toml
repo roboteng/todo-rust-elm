@@ -9,6 +9,7 @@ keywords = ["elm", "websockets"]
 [dependencies]
 axum = { version = "0.8.4", features = ["ws", "macros"] }
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
+bcrypt-pbkdf = "0.10.0"
 futures-util = "0.3.31"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"

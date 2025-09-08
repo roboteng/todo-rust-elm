@@ -22,6 +22,7 @@ use tower_http::{
 
 use axum::extract::connect_info::ConnectInfo;
 
+use crate::auth::*;
 use futures_util::{
     sink::SinkExt,
     stream::{SplitSink, StreamExt},
@@ -33,7 +34,7 @@ type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
 struct AppState {
     tasks: Arc<Mutex<Tasks>>,
     clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
-    users: Arc<Mutex<HashMap<String, String>>>,
+    users: Arc<Mutex<Users>>,
 }
 
 pub struct Env {
@@ -266,8 +267,8 @@ async fn handle_register(
     Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     let mut users = state.users.lock().await;
-    if let std::collections::hash_map::Entry::Vacant(e) = users.entry(req.username) {
-        e.insert(req.password);
+    if let Entry::Vacant(e) = users.find(req.username) {
+        e.insert(UserData::new(req.password));
         StatusCode::CREATED
     } else {
         StatusCode::CONFLICT
@@ -277,8 +278,8 @@ async fn handle_register(
 #[axum::debug_handler]
 async fn handle_login(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> Response {
     let users = state.users.lock().await;
-    if let Some(password) = users.get(&req.username) {
-        if *password == req.password {
+    if let Some(user) = users.get(req.username) {
+        if user.matches_password(&req.password) {
             Response::builder()
                 .status(StatusCode::OK)
                 .header(
