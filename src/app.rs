@@ -1,15 +1,21 @@
 use axum::{
     Json, Router,
-    body::Body,
     extract::{
-        State,
+        FromRef, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{any, post},
 };
-use axum_extra::{TypedHeader, headers};
+use axum_extra::{
+    TypedHeader,
+    extract::{
+        PrivateCookieJar,
+        cookie::{Cookie, Key, SameSite},
+    },
+    headers,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
@@ -35,6 +41,12 @@ struct AppState {
     tasks: Arc<Mutex<Tasks>>,
     clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
     users: Arc<Mutex<Users>>,
+}
+
+impl FromRef<AppState> for Key {
+    fn from_ref(_input: &AppState) -> Self {
+        Key::from(&[42; 64])
+    }
 }
 
 pub struct Env {
@@ -85,6 +97,7 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State(app_state): State<AppState>,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
+    jar: PrivateCookieJar,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
     let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
@@ -93,7 +106,23 @@ async fn ws_handler(
         String::from("Unknown browser")
     };
     tracing::debug!("`{user_agent}` at {addr} connected.");
-    ws.on_upgrade(move |socket| handle_socket(socket, addr, app_state))
+    match jar.get("session") {
+        Some(cookie) => {
+            let session_id = match cookie.value().parse() {
+                Ok(id) => id,
+                Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+            };
+            let app = app_state.clone();
+            let users = app.users.lock().await;
+            match users.get_session(session_id) {
+                Some(_user_id) => {
+                    ws.on_upgrade(move |socket| handle_socket(socket, addr, app_state))
+                }
+                None => StatusCode::UNAUTHORIZED.into_response(),
+            }
+        }
+        None => StatusCode::UNAUTHORIZED.into_response(),
+    }
 }
 
 async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) {
@@ -274,24 +303,22 @@ async fn handle_register(
 }
 
 #[axum::debug_handler]
-async fn handle_login(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> Response {
-    let users = state.users.lock().await;
-    match users.get(req.username) {
-        Some(user) => {
-            if user.matches_password(&req.password) {
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(
-                        "Set-Cookie",
-                        "session=123; HttpOnly; Secure; SameSite=Strict; Path=/;",
-                    )
-                    .body(Body::empty())
-                    .unwrap()
-            } else {
-                StatusCode::UNAUTHORIZED.into_response()
-            }
+async fn handle_login(
+    State(state): State<AppState>,
+    jar: PrivateCookieJar,
+    Json(req): Json<RegisterRequest>,
+) -> Response {
+    let mut users = state.users.lock().await;
+    match users.try_login(req.username, req.password) {
+        Some(session_id) => {
+            let mut cookie = Cookie::new("session", format!("{session_id}"));
+            cookie.set_path("/");
+            cookie.set_http_only(true);
+            cookie.set_same_site(SameSite::Strict);
+            let jar = jar.add(cookie);
+            (jar, StatusCode::OK).into_response()
         }
-        _ => StatusCode::UNAUTHORIZED.into_response(),
+        None => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
 
@@ -302,7 +329,10 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
     use std::net::{Ipv4Addr, SocketAddr};
-    use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
+    use tokio_tungstenite::{
+        connect_async,
+        tungstenite::{Message as TungsteniteMessage, client::IntoClientRequest},
+    };
 
     use super::*;
 
@@ -327,9 +357,55 @@ mod tests {
             .unwrap();
         });
 
-        // Connect WebSocket client
+        // Register a user
+        let client = reqwest::Client::new();
+        let register_body = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+        let register_json = serde_json::to_string(&register_body).unwrap();
+
+        let register_response = client
+            .post(&format!("http://{addr}/api/register"))
+            .header("content-type", "application/json")
+            .body(register_json)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(register_response.status(), reqwest::StatusCode::CREATED);
+
+        // Login to get session cookie
+        let login_json = serde_json::to_string(&register_body).unwrap();
+        let login_response = client
+            .post(&format!("http://{addr}/api/login"))
+            .header("content-type", "application/json")
+            .body(login_json)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(login_response.status(), reqwest::StatusCode::OK);
+
+        let session_cookie = login_response
+            .headers()
+            .get("set-cookie")
+            .expect("Set-Cookie header not found")
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .strip_prefix("session=")
+            .expect("Session cookie not found")
+            .to_string();
+
+        // Connect WebSocket client with session cookie
         let url = format!("ws://{addr}/ws");
-        let (mut ws_stream, _) = connect_async(&url).await.unwrap();
+        let mut req = url.into_client_request().unwrap();
+        req.headers_mut().insert(
+            "cookie",
+            format!("session={}", session_cookie).parse().unwrap(),
+        );
+        let (mut ws_stream, _) = connect_async(req).await.unwrap();
 
         // Test sending tasks message
         let test_tasks = Tasks {
@@ -377,6 +453,37 @@ mod tests {
             }
         } else {
             panic!("Expected text message");
+        }
+    }
+
+    #[tokio::test]
+    async fn unit_websocket_unauthenticated() {
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let temp = std::env::temp_dir();
+        let app_state = AppState::default();
+        let app = make_app(temp, app_state);
+
+        // Spawn server in background
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let res = connect_async(&url).await.unwrap_err();
+        match res {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                assert_eq!(response.status(), StatusCode::UNAUTHORIZED)
+            }
+            _ => panic!("Unexpected error: {:?}", res),
         }
     }
 

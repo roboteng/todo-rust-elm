@@ -24,6 +24,7 @@
             });
             app.ports.connectWebsocket.subscribe((connect) => {
                 if (connect) {
+                    if (socket) return;
                     socket = new WebSocket(
                         `${wsProtocol}//${window.location.host}/ws`,
                     );
@@ -38,7 +39,7 @@
                     socket.addEventListener("close", (e) =>
                         console.log("close", e),
                     );
-                    socket.addEventListener("error", () =>
+                    socket.addEventListener("error", (e) =>
                         console.warn("error", e),
                     );
                 } else {

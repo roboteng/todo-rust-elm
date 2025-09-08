@@ -2,10 +2,12 @@ use rand::random;
 use std::collections::{HashMap, hash_map::Entry};
 
 pub type UserId = u64;
+pub type SessionId = u64;
 
 #[derive(Debug, Clone, Default)]
 pub struct Users {
     users: HashMap<UserId, UserData>,
+    sessions: HashMap<SessionId, UserId>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,20 +33,24 @@ impl Users {
         }
     }
 
-    pub fn get(&self, username: impl AsRef<str>) -> Option<UserData> {
-        self.users
+    pub fn try_login(&mut self, username: String, password: String) -> Option<UserId> {
+        let user_id = self
+            .users
             .iter()
-            .find(|u| u.1.username.as_str() == username.as_ref())
-            .map(|(_, data)| data.clone())
+            .find(|u| u.1.username == username && u.1.password == password)
+            .map(|(id, _)| *id)?;
+        let session_id = random();
+        self.sessions.insert(session_id, user_id);
+        Some(session_id)
+    }
+
+    pub fn get_session(&self, session_id: SessionId) -> Option<UserId> {
+        self.sessions.get(&session_id).copied()
     }
 }
 
 impl UserData {
     pub fn new(username: String, password: String) -> Self {
         Self { username, password }
-    }
-
-    pub fn matches_password(&self, password: &str) -> bool {
-        self.password == password
     }
 }
