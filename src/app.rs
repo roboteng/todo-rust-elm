@@ -1,10 +1,10 @@
 use axum::{
     Json, Router,
     extract::{
-        FromRef, State,
+        FromRef, FromRequestParts, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::StatusCode,
+    http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
     routing::{any, post},
 };
@@ -88,16 +88,53 @@ fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
         )
 }
 
+struct AuthedUser {
+    #[allow(dead_code)]
+    session_id: SessionId,
+    #[allow(dead_code)]
+    user_id: UserId,
+}
+
+impl FromRequestParts<AppState> for AuthedUser {
+    #[doc = " If the extractor fails it\'ll use this `Rejection` type. A rejection is"]
+    #[doc = " a kind of error that can be converted into a response."]
+    type Rejection = StatusCode;
+
+    #[doc = " Perform the extraction."]
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let jar = PrivateCookieJar::<Key>::from_request_parts(parts, state)
+            .await
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let cookie = jar.get("session").ok_or(StatusCode::UNAUTHORIZED)?;
+        let session = cookie.value();
+        let session_id = session.parse().map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let user_id = state
+            .users
+            .lock()
+            .await
+            .get_session(session_id)
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+        Ok(AuthedUser {
+            session_id,
+            user_id,
+        })
+    }
+}
+
 /// The handler for the HTTP request (this gets called when the HTTP request lands at the start
 /// of websocket negotiation). After this completes, the actual switching from HTTP to
 /// websocket protocol will occur.
 /// This is the last point where we can extract TCP/IP metadata such as IP address of the client
 /// as well as things from HTTP headers such as user-agent of the browser etc.
+#[axum::debug_handler]
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(app_state): State<AppState>,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
-    jar: PrivateCookieJar,
+    _user: AuthedUser,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
     let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
@@ -106,23 +143,7 @@ async fn ws_handler(
         String::from("Unknown browser")
     };
     tracing::debug!("`{user_agent}` at {addr} connected.");
-    match jar.get("session") {
-        Some(cookie) => {
-            let session_id = match cookie.value().parse() {
-                Ok(id) => id,
-                Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
-            };
-            let app = app_state.clone();
-            let users = app.users.lock().await;
-            match users.get_session(session_id) {
-                Some(_user_id) => {
-                    ws.on_upgrade(move |socket| handle_socket(socket, addr, app_state))
-                }
-                None => StatusCode::UNAUTHORIZED.into_response(),
-            }
-        }
-        None => StatusCode::UNAUTHORIZED.into_response(),
-    }
+    ws.on_upgrade(move |socket| handle_socket(socket, addr, app_state))
 }
 
 async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) {
