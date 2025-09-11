@@ -2,73 +2,73 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Elm
-      uses: jorelali/setup-elm@v5
-      with:
-        elm-version: 0.19.1
-    
-    - name: Install elm-test
-      run: npm install -g elm-test
-    
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        components: clippy
-        override: true
-    
-    - name: Cache Cargo dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-    
-    - name: Cache Elm dependencies  
-      uses: actions/cache@v3
-      with:
-        path: elm-stuff
-        key: ${{ runner.os }}-elm-${{ hashFiles('**/elm.json') }}
-    
-    - name: Build Elm
-      run: elm make elm-src/Main.elm --output assets/elm.js
-    
-    - name: Run Elm tests
-      run: elm-test
-    
-    - name: Run Cargo tests
-      run: cargo test
-    
-    - name: Run Cargo clippy
-      run: cargo clippy -- -D warnings
+      - uses: actions/checkout@v4
+
+      - name: Setup Elm
+        uses: jorelali/setup-elm@v5
+        with:
+          elm-version: 0.19.1
+
+      - name: Install elm-test
+        run: npm install -g elm-test
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          override: true
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache Elm dependencies
+        uses: actions/cache@v3
+        with:
+          path: elm-stuff
+          key: ${{ runner.os }}-elm-${{ hashFiles('**/elm.json') }}
+
+      - name: Build Elm
+        run: elm make elm-src/Main.elm --output assets/elm.js
+
+      - name: Run Elm tests
+        run: elm-test
+
+      - name: Run Cargo tests
+        run: cargo test
+
+      - name: Run Cargo clippy
+        run: cargo clippy -- -D warnings --all-features --all-targets
 
   deploy:
     needs: validate
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup flyctl
-      uses: superfly/flyctl-actions/setup-flyctl@master
-    
-    - name: Deploy to fly.io
-      run: flyctl deploy --remote-only
-      env:
-        FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - uses: actions/checkout@v4
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

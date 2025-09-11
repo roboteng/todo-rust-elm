@@ -387,7 +387,7 @@ mod tests {
         let register_json = serde_json::to_string(&register_body).unwrap();
 
         let register_response = client
-            .post(&format!("http://{addr}/api/register"))
+            .post(format!("http://{addr}/api/register"))
             .header("content-type", "application/json")
             .body(register_json)
             .send()
@@ -398,7 +398,7 @@ mod tests {
         // Login to get session cookie
         let login_json = serde_json::to_string(&register_body).unwrap();
         let login_response = client
-            .post(&format!("http://{addr}/api/login"))
+            .post(format!("http://{addr}/api/login"))
             .header("content-type", "application/json")
             .body(login_json)
             .send()
@@ -424,7 +424,7 @@ mod tests {
         let mut req = url.into_client_request().unwrap();
         req.headers_mut().insert(
             "cookie",
-            format!("session={}", session_cookie).parse().unwrap(),
+            format!("session={session_cookie}").parse().unwrap(),
         );
         let (mut ws_stream, _) = connect_async(req).await.unwrap();
 
@@ -504,7 +504,7 @@ mod tests {
             tokio_tungstenite::tungstenite::Error::Http(response) => {
                 assert_eq!(response.status(), StatusCode::UNAUTHORIZED)
             }
-            _ => panic!("Unexpected error: {:?}", res),
+            _ => panic!("Unexpected error: {res:?}"),
         }
     }
 
