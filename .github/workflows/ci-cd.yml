@@ -55,7 +55,7 @@ jobs:
         run: cargo test
 
       - name: Run Cargo clippy
-        run: cargo clippy -- -D warnings --all-features --all-targets
+        run: cargo clippy  --all-features --all-targets -- -D warnings
 
   deploy:
     needs: validate
