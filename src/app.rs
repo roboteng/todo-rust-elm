@@ -347,6 +347,8 @@ async fn handle_login(
 mod tests {
     use axum::{Extension, http::StatusCode};
     use axum_test::{TestServer, Transport};
+    #[allow(unused_imports)]
+    use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
     use serde_json::json;
     use std::net::{Ipv4Addr, SocketAddr};
 
@@ -394,10 +396,7 @@ mod tests {
         let updated_response: OutMsg = serde_json::from_str(&updated_msg).unwrap();
         match updated_response {
             OutMsg::NewTasks(tasks) => {
-                assert_eq!(tasks.tasks.len(), 1);
-                assert_eq!(tasks.tasks[0].summary, "test");
-                assert_eq!(tasks.tasks[0].id, 1);
-                assert_eq!(tasks.next_id, 2);
+                assert_eq!(test_tasks, tasks);
             }
         }
 
@@ -537,57 +536,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unit_websocket_testserver() {
+    async fn unit_one_user_logged_in_twice_gets_updates() {
         let server = test_server_http();
 
-        // Register and login to get session cookie
-        let user_data = json!({
+        let request_body = json!({
             "username": "testuser",
             "password": "testpass"
         });
+        server.post("/api/register").json(&request_body).await;
 
-        server.post("/api/register").json(&user_data).await;
-        let login_response = server.post("/api/login").json(&user_data).await;
-        login_response.assert_status(StatusCode::OK);
+        let client1 = server.post("/api/login").json(&request_body).await;
+        let client2 = server.post("/api/login").json(&request_body).await;
+        let mut ws1 = server
+            .get_websocket("/ws")
+            .add_cookie(client1.cookie("session"))
+            .await
+            .into_websocket()
+            .await;
+        let mut ws2 = server
+            .get_websocket("/ws")
+            .add_cookie(client2.cookie("session"))
+            .await
+            .into_websocket()
+            .await;
 
-        let ws_request = server.get_websocket("/ws");
-        let mut websocket = ws_request.await.into_websocket().await;
-
-        // Test sending tasks message
-        let test_tasks = Tasks {
-            tasks: vec![Task {
-                id: 1,
-                summary: "test task".to_string(),
-            }],
-            next_id: 2,
-        };
-        let tasks_msg = serde_json::to_string(&InMsg::Tasks(test_tasks.clone())).unwrap();
-
-        websocket.send_text(tasks_msg).await;
-
-        // First message should be initial empty tasks
-        let initial_msg = websocket.receive_text().await;
-        let initial_response: OutMsg = serde_json::from_str(&initial_msg).unwrap();
-        match initial_response {
-            OutMsg::NewTasks(tasks) => {
-                assert_eq!(tasks.tasks.len(), 0);
-                assert_eq!(tasks.next_id, 0);
-            }
+        ws1.send_text(serde_json::to_string(&InMsg::Tasks(Tasks::single_task())).unwrap())
+            .await;
+        let _msg = ws2.receive_json::<OutMsg>().await;
+        let msg = ws2.receive_json::<OutMsg>().await;
+        match msg {
+            OutMsg::NewTasks(tasks) => assert_eq!(tasks, Tasks::single_task()),
         }
-
-        // Second message should be the updated tasks
-        let updated_msg = websocket.receive_text().await;
-        let updated_response: OutMsg = serde_json::from_str(&updated_msg).unwrap();
-        match updated_response {
-            OutMsg::NewTasks(tasks) => {
-                assert_eq!(tasks.tasks.len(), 1);
-                assert_eq!(tasks.tasks[0].summary, "test task");
-                assert_eq!(tasks.tasks[0].id, 1);
-                assert_eq!(tasks.next_id, 2);
-            }
-        }
-
-        websocket.close().await;
     }
 
     fn test_server() -> TestServer {
@@ -612,5 +591,17 @@ mod tests {
         config.transport = Some(Transport::HttpRandomPort);
 
         TestServer::new_with_config(app, config).unwrap()
+    }
+
+    impl Tasks {
+        fn single_task() -> Self {
+            Self {
+                tasks: vec![Task {
+                    id: 1,
+                    summary: "test".to_string(),
+                }],
+                next_id: 2,
+            }
+        }
     }
 }
