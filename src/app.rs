@@ -199,20 +199,20 @@ struct NewTask {
     summary: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct Task {
     id: i32,
     summary: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 struct Tasks {
     tasks: Vec<Task>,
     next_id: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum OutMsg {
     NewTasks(Tasks),
@@ -370,35 +370,16 @@ mod tests {
 
         let mut websocket = server.get_websocket("/ws").await.into_websocket().await;
 
-        // Test sending tasks message
-        let test_tasks = Tasks {
-            tasks: vec![Task {
-                id: 1,
-                summary: "test".to_string(),
-            }],
-            next_id: 2,
-        };
-        let tasks_msg = serde_json::to_string(&InMsg::Tasks(test_tasks.clone())).unwrap();
-        websocket.send_text(tasks_msg).await;
+        let test_tasks = Tasks::single_task();
+        websocket.send_inmsg(InMsg::Tasks(test_tasks.clone())).await;
 
         // First message should be initial empty tasks
-        let initial_msg = websocket.receive_text().await;
-        let initial_response: OutMsg = serde_json::from_str(&initial_msg).unwrap();
-        match initial_response {
-            OutMsg::NewTasks(tasks) => {
-                assert_eq!(tasks.tasks.len(), 0);
-                assert_eq!(tasks.next_id, 0);
-            }
-        }
+        let initial_response = websocket.receive_outmsg().await;
+        assert_eq!(initial_response, OutMsg::NewTasks(Tasks::default()));
 
         // Second message should be the updated tasks
-        let updated_msg = websocket.receive_text().await;
-        let updated_response: OutMsg = serde_json::from_str(&updated_msg).unwrap();
-        match updated_response {
-            OutMsg::NewTasks(tasks) => {
-                assert_eq!(test_tasks, tasks);
-            }
-        }
+        let updated_response = websocket.receive_outmsg().await;
+        assert_eq!(updated_response, OutMsg::NewTasks(test_tasks));
 
         websocket.close().await;
     }
@@ -562,11 +543,10 @@ mod tests {
 
         ws1.send_text(serde_json::to_string(&InMsg::Tasks(Tasks::single_task())).unwrap())
             .await;
-        let _msg = ws2.receive_json::<OutMsg>().await;
-        let msg = ws2.receive_json::<OutMsg>().await;
-        match msg {
-            OutMsg::NewTasks(tasks) => assert_eq!(tasks, Tasks::single_task()),
-        }
+        let _msg = ws2.receive_outmsg().await;
+        let msg = ws2.receive_outmsg().await;
+
+        assert_eq!(msg, OutMsg::NewTasks(Tasks::single_task()));
     }
 
     fn test_server() -> TestServer {
@@ -602,6 +582,21 @@ mod tests {
                 }],
                 next_id: 2,
             }
+        }
+    }
+
+    trait TestWebSocketExt {
+        async fn receive_outmsg(&mut self) -> OutMsg;
+        async fn send_inmsg(&mut self, msg: impl Into<InMsg>);
+    }
+    impl TestWebSocketExt for axum_test::TestWebSocket {
+        async fn receive_outmsg(&mut self) -> OutMsg {
+            self.receive_json::<OutMsg>().await
+        }
+
+        async fn send_inmsg(&mut self, msg: impl Into<InMsg>) {
+            self.send_text(&serde_json::to_string(&msg.into()).unwrap())
+                .await;
         }
     }
 }
