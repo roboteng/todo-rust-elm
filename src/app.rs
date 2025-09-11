@@ -345,88 +345,28 @@ async fn handle_login(
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
-    use axum_test::TestServer;
-    use futures_util::{SinkExt, StreamExt};
+    use axum::{Extension, http::StatusCode};
+    use axum_test::{TestServer, Transport};
     use serde_json::json;
     use std::net::{Ipv4Addr, SocketAddr};
-    use tokio_tungstenite::{
-        connect_async,
-        tungstenite::{Message as TungsteniteMessage, client::IntoClientRequest},
-    };
 
     use super::*;
 
     #[tokio::test]
     async fn unit_websocket() {
-        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
-            .await
-            .unwrap();
-        let addr = listener.local_addr().unwrap();
+        let server = test_server_http();
 
-        let temp = std::env::temp_dir();
-        let app_state = AppState::default();
-        let app = make_app(temp, app_state);
-
-        // Spawn server in background
-        tokio::spawn(async move {
-            axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await
-            .unwrap();
-        });
-
-        // Register a user
-        let client = reqwest::Client::new();
-        let register_body = json!({
+        // Register and login user
+        let user_data = json!({
             "username": "testuser",
             "password": "testpass"
         });
-        let register_json = serde_json::to_string(&register_body).unwrap();
 
-        let register_response = client
-            .post(format!("http://{addr}/api/register"))
-            .header("content-type", "application/json")
-            .body(register_json)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(register_response.status(), reqwest::StatusCode::CREATED);
+        server.post("/api/register").json(&user_data).await;
+        let login_response = server.post("/api/login").json(&user_data).await;
+        login_response.assert_status(StatusCode::OK);
 
-        // Login to get session cookie
-        let login_json = serde_json::to_string(&register_body).unwrap();
-        let login_response = client
-            .post(format!("http://{addr}/api/login"))
-            .header("content-type", "application/json")
-            .body(login_json)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(login_response.status(), reqwest::StatusCode::OK);
-
-        let session_cookie = login_response
-            .headers()
-            .get("set-cookie")
-            .expect("Set-Cookie header not found")
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap()
-            .strip_prefix("session=")
-            .expect("Session cookie not found")
-            .to_string();
-
-        // Connect WebSocket client with session cookie
-        let url = format!("ws://{addr}/ws");
-        let mut req = url.into_client_request().unwrap();
-        req.headers_mut().insert(
-            "cookie",
-            format!("session={session_cookie}").parse().unwrap(),
-        );
-        let (mut ws_stream, _) = connect_async(req).await.unwrap();
+        let mut websocket = server.get_websocket("/ws").await.into_websocket().await;
 
         // Test sending tasks message
         let test_tasks = Tasks {
@@ -437,75 +377,40 @@ mod tests {
             next_id: 2,
         };
         let tasks_msg = serde_json::to_string(&InMsg::Tasks(test_tasks.clone())).unwrap();
-        ws_stream
-            .send(TungsteniteMessage::Text(tasks_msg))
-            .await
-            .unwrap();
+        websocket.send_text(tasks_msg).await;
 
         // First message should be initial empty tasks
-        if let Some(msg) = ws_stream.next().await {
-            let msg = msg.unwrap();
-            if let TungsteniteMessage::Text(text) = msg {
-                let response: OutMsg = serde_json::from_str(&text).unwrap();
-                match response {
-                    OutMsg::NewTasks(tasks) => {
-                        // Should be empty initially
-                        assert_eq!(tasks.tasks.len(), 0);
-                        assert_eq!(tasks.next_id, 0);
-                    }
-                }
+        let initial_msg = websocket.receive_text().await;
+        let initial_response: OutMsg = serde_json::from_str(&initial_msg).unwrap();
+        match initial_response {
+            OutMsg::NewTasks(tasks) => {
+                assert_eq!(tasks.tasks.len(), 0);
+                assert_eq!(tasks.next_id, 0);
             }
         }
 
-        let msg = ws_stream
-            .next()
-            .await
-            .expect("Failed to receive message")
-            .expect("Failed to read message");
-        if let TungsteniteMessage::Text(text) = msg {
-            let response: OutMsg = serde_json::from_str(&text).unwrap();
-            match response {
-                OutMsg::NewTasks(tasks) => {
-                    assert_eq!(tasks.tasks.len(), 1);
-                    assert_eq!(tasks.tasks[0].summary, "test");
-                    assert_eq!(tasks.tasks[0].id, 1);
-                    assert_eq!(tasks.next_id, 2);
-                }
+        // Second message should be the updated tasks
+        let updated_msg = websocket.receive_text().await;
+        let updated_response: OutMsg = serde_json::from_str(&updated_msg).unwrap();
+        match updated_response {
+            OutMsg::NewTasks(tasks) => {
+                assert_eq!(tasks.tasks.len(), 1);
+                assert_eq!(tasks.tasks[0].summary, "test");
+                assert_eq!(tasks.tasks[0].id, 1);
+                assert_eq!(tasks.next_id, 2);
             }
-        } else {
-            panic!("Expected text message");
         }
+
+        websocket.close().await;
     }
 
     #[tokio::test]
     async fn unit_websocket_unauthenticated() {
-        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
-            .await
-            .unwrap();
-        let addr = listener.local_addr().unwrap();
+        let server = test_server_http();
 
-        let temp = std::env::temp_dir();
-        let app_state = AppState::default();
-        let app = make_app(temp, app_state);
+        let ws_result = server.get_websocket("/ws").await;
 
-        // Spawn server in background
-        tokio::spawn(async move {
-            axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await
-            .unwrap();
-        });
-
-        let url = format!("ws://{addr}/ws");
-        let res = connect_async(&url).await.unwrap_err();
-        match res {
-            tokio_tungstenite::tungstenite::Error::Http(response) => {
-                assert_eq!(response.status(), StatusCode::UNAUTHORIZED)
-            }
-            _ => panic!("Unexpected error: {res:?}"),
-        }
+        assert_eq!(ws_result.status_code(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -581,14 +486,6 @@ mod tests {
         response2.assert_status(StatusCode::CREATED);
     }
 
-    fn test_server() -> TestServer {
-        let temp = std::env::temp_dir();
-        let app_state = AppState::default();
-        let app = make_app(temp, app_state);
-
-        TestServer::new(app).unwrap()
-    }
-
     #[tokio::test]
     async fn unit_login() {
         let server = test_server();
@@ -637,5 +534,83 @@ mod tests {
         let response = server.post("/api/login").json(&login_body).await;
 
         response.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn unit_websocket_testserver() {
+        let server = test_server_http();
+
+        // Register and login to get session cookie
+        let user_data = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        server.post("/api/register").json(&user_data).await;
+        let login_response = server.post("/api/login").json(&user_data).await;
+        login_response.assert_status(StatusCode::OK);
+
+        let ws_request = server.get_websocket("/ws");
+        let mut websocket = ws_request.await.into_websocket().await;
+
+        // Test sending tasks message
+        let test_tasks = Tasks {
+            tasks: vec![Task {
+                id: 1,
+                summary: "test task".to_string(),
+            }],
+            next_id: 2,
+        };
+        let tasks_msg = serde_json::to_string(&InMsg::Tasks(test_tasks.clone())).unwrap();
+
+        websocket.send_text(tasks_msg).await;
+
+        // First message should be initial empty tasks
+        let initial_msg = websocket.receive_text().await;
+        let initial_response: OutMsg = serde_json::from_str(&initial_msg).unwrap();
+        match initial_response {
+            OutMsg::NewTasks(tasks) => {
+                assert_eq!(tasks.tasks.len(), 0);
+                assert_eq!(tasks.next_id, 0);
+            }
+        }
+
+        // Second message should be the updated tasks
+        let updated_msg = websocket.receive_text().await;
+        let updated_response: OutMsg = serde_json::from_str(&updated_msg).unwrap();
+        match updated_response {
+            OutMsg::NewTasks(tasks) => {
+                assert_eq!(tasks.tasks.len(), 1);
+                assert_eq!(tasks.tasks[0].summary, "test task");
+                assert_eq!(tasks.tasks[0].id, 1);
+                assert_eq!(tasks.next_id, 2);
+            }
+        }
+
+        websocket.close().await;
+    }
+
+    fn test_server() -> TestServer {
+        let temp = std::env::temp_dir();
+        let app_state = AppState::default();
+        let app = make_app(temp, app_state);
+
+        TestServer::new(app).unwrap()
+    }
+
+    fn test_server_http() -> TestServer {
+        let temp = std::env::temp_dir();
+        let app_state = AppState::default();
+
+        let app = make_app(temp, app_state).layer(Extension(ConnectInfo(SocketAddr::from((
+            Ipv4Addr::LOCALHOST,
+            8080,
+        )))));
+
+        let mut config = axum_test::TestServerConfig::new();
+        config.save_cookies = true;
+        config.transport = Some(Transport::HttpRandomPort);
+
+        TestServer::new_with_config(app, config).unwrap()
     }
 }

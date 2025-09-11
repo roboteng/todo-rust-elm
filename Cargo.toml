@@ -20,10 +20,8 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [dev-dependencies]
-axum-test = "18.0.0"
+axum-test = { version = "18.0.0", features = ["ws"] }
 pretty_assertions = "1.4.1"
-reqwest = "0.12.23"
-tokio-tungstenite = "0.24.0"
 
 [lints.clippy]
 all = "warn"
