@@ -74,10 +74,10 @@ init _ url key =
                     New
 
                 Route.Register ->
-                    Register Register.init
+                    Register <| Register.init key
 
                 Route.Login ->
-                    Login Login.init
+                    Login <| Login.init key
       , loggedIn = False
       }
     , P.connectWebsocket False
@@ -122,10 +122,10 @@ update msg model =
                             New
 
                         Route.Register ->
-                            Register Register.init
+                            Register <| Register.init model.key
 
                         Route.Login ->
-                            Login Login.init
+                            Login <| Login.init model.key
             in
             ( { model | page = page }
             , Cmd.none

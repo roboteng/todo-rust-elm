@@ -1,5 +1,6 @@
 module Register exposing (Model, Msg(..), init, update, view)
 
+import Browser.Navigation as Nav
 import Html.Styled
     exposing
         ( Html
@@ -29,7 +30,7 @@ import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
-import Route
+import Route exposing (Route)
 
 
 type Model
@@ -37,6 +38,7 @@ type Model
         { username : String
         , password : String
         , message : Maybe String
+        , key : Nav.Key
         }
 
 
@@ -47,12 +49,13 @@ type Msg
     | Response (Result Http.Error ())
 
 
-init : Model
-init =
+init : Nav.Key -> Model
+init key =
     M
         { username = ""
         , password = ""
         , message = Nothing
+        , key = key
         }
 
 
@@ -66,7 +69,7 @@ update msg (M model) =
             ( M { model | password = password }, Cmd.none )
 
         Submit ->
-            ( init
+            ( init model.key
             , Http.post
                 { url = "/api/register"
                 , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string model.username ), ( "password", Encode.string model.password ) ]
@@ -77,7 +80,9 @@ update msg (M model) =
         Response result ->
             case result of
                 Ok _ ->
-                    ( M { model | message = Just "Account Created" }, Cmd.none )
+                    ( M { model | message = Just "Account Created" }
+                    , Nav.pushUrl model.key <| Route.encodeRoute Route.Login
+                    )
 
                 Err (Http.BadStatus 409) ->
                     ( M { model | message = Just "Username already exists, pick a different one" }, Cmd.none )
