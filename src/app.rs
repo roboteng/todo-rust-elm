@@ -26,8 +26,6 @@ use tower_http::{
     trace::{DefaultMakeSpan, TraceLayer},
 };
 
-use axum::extract::connect_info::ConnectInfo;
-
 use crate::auth::*;
 use futures_util::{
     sink::SinkExt,
@@ -38,8 +36,8 @@ type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
 
 #[derive(Clone, Default)]
 struct AppState {
-    tasks: Arc<Mutex<Tasks>>,
-    clients: Arc<Mutex<HashMap<SocketAddr, WsSender>>>,
+    tasks: Arc<Mutex<HashMap<UserId, Tasks>>>,
+    clients: Arc<Mutex<HashMap<SessionId, WsSender>>>,
     users: Arc<Mutex<Users>>,
 }
 
@@ -88,10 +86,9 @@ fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
         )
 }
 
+#[derive(Debug, Clone, Copy)]
 struct AuthedUser {
-    #[allow(dead_code)]
     session_id: SessionId,
-    #[allow(dead_code)]
     user_id: UserId,
 }
 
@@ -134,29 +131,34 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State(app_state): State<AppState>,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
-    _user: AuthedUser,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    user: AuthedUser,
 ) -> impl IntoResponse {
     let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
         user_agent.to_string()
     } else {
         String::from("Unknown browser")
     };
-    tracing::debug!("`{user_agent}` at {addr} connected.");
-    ws.on_upgrade(move |socket| handle_socket(socket, addr, app_state))
+    tracing::debug!("`{user_agent}` for session {} connected.", user.session_id);
+    ws.on_upgrade(move |socket| handle_socket(socket, user, app_state))
 }
 
-async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) {
+async fn handle_socket(socket: WebSocket, session: AuthedUser, app_state: AppState) {
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
 
-    app_state.clients.lock().await.insert(who, sender.clone());
+    app_state
+        .clients
+        .lock()
+        .await
+        .insert(session.session_id, sender.clone());
 
     // Send current tasks to the newly connected client
     {
-        let tasks = app_state.tasks.lock().await;
+        let tasks_map = app_state.tasks.lock().await;
+        let ts = Tasks::default();
+        let tasks = tasks_map.get(&session.user_id).unwrap_or(&ts);
         let mut send = sender.lock().await;
         let sent = send
             .send(Message::Text(
@@ -166,7 +168,11 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) 
             ))
             .await;
         if let Err(e) = sent {
-            tracing::error!("Failed to send initial tasks to client {}: {}", who, e);
+            tracing::error!(
+                "Failed to send initial tasks to user {}: {}",
+                session.user_id,
+                e
+            );
         }
     }
 
@@ -177,7 +183,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) 
         while let Some(Ok(msg)) = receiver.next().await {
             cnt += 1;
             // print message and break if instructed to do so
-            if process_message(msg, who, sender.clone(), app_state_clone.clone())
+            if process_message(msg, session, sender.clone(), app_state_clone.clone())
                 .await
                 .is_break()
             {
@@ -189,9 +195,12 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, app_state: AppState) 
 
     recv_task.await.unwrap();
 
-    app_state.clients.lock().await.remove(&who);
+    app_state.clients.lock().await.remove(&session.session_id);
 
-    tracing::debug!("Websocket context {who} destroyed");
+    tracing::debug!(
+        "Websocket context for session {} destroyed",
+        session.session_id
+    );
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -212,13 +221,13 @@ struct Tasks {
     next_id: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum OutMsg {
     NewTasks(Tasks),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(tag = "action", content = "payload", rename_all = "snake_case")]
 enum InMsg {
     Tasks(Tasks),
@@ -226,25 +235,37 @@ enum InMsg {
 
 type Shared<T> = Arc<Mutex<T>>;
 
-async fn broadcast_tasks_to_all(app_state: &AppState, tasks: &Tasks) {
-    let clients = app_state.clients.lock().await;
+async fn broadcast_tasks(app_state: &AppState, user_id: u64) {
+    let tasks_stored = app_state.tasks.lock().await;
+    let tasks = match tasks_stored.get(&user_id) {
+        Some(tasks) => tasks,
+        None => return,
+    };
     let message = Message::Text(
         serde_json::to_string(&OutMsg::NewTasks(tasks.clone()))
             .unwrap()
             .into(),
     );
 
-    // Send to all connected clients
-    for (addr, sender) in clients.iter() {
+    let sessions = app_state.users.lock().await.get_sessions(user_id);
+    let clients = app_state.clients.lock().await;
+    let user_clients = clients
+        .iter()
+        .filter(|(entry_session, _)| sessions.contains(entry_session));
+    for (session_id, sender) in user_clients {
         let mut send = sender.lock().await;
         if let Err(e) = send.send(message.clone()).await {
-            tracing::error!("Failed to send tasks update to client {}: {}", addr, e);
+            tracing::error!(
+                "Failed to send tasks update to session {}: {}",
+                session_id,
+                e
+            );
         }
     }
 
     tracing::debug!(
         "Broadcasted tasks to {} clients: {} tasks, next_id: {}",
-        clients.len(),
+        sessions.len(),
         tasks.tasks.len(),
         tasks.next_id
     );
@@ -253,7 +274,7 @@ async fn broadcast_tasks_to_all(app_state: &AppState, tasks: &Tasks) {
 /// helper to print contents of messages to stdout. Has special treatment for Close.
 async fn process_message(
     msg: Message,
-    who: SocketAddr,
+    session: AuthedUser,
     _sender: Shared<SplitSink<WebSocket, Message>>,
     app_state: AppState,
 ) -> ControlFlow<(), ()> {
@@ -266,40 +287,51 @@ async fn process_message(
                     // Client is source of truth - replace server state with client state
                     {
                         let mut current_state = app_state.tasks.lock().await;
-                        *current_state = client_tasks.clone();
+                        current_state.insert(session.user_id, client_tasks);
                     }
 
                     // Broadcast the updated tasks to ALL connected clients
-                    broadcast_tasks_to_all(&app_state, &client_tasks).await;
+                    broadcast_tasks(&app_state, session.user_id).await;
                 }
                 Err(e) => {
-                    tracing::error!("Unhandled message from {}: {}", who, e);
+                    tracing::error!(
+                        "Unhandled message from session {}: {}",
+                        session.session_id,
+                        e
+                    );
                 }
             }
         }
         Message::Binary(d) => {
-            println!(">>> {who} sent {} bytes: {d:?}", d.len());
+            println!(
+                ">>> session {} sent {} bytes: {d:?}",
+                session.session_id,
+                d.len()
+            );
         }
         Message::Close(c) => {
             if let Some(cf) = c {
                 println!(
-                    ">>> {who} sent close with code {} and reason `{}`",
-                    cf.code, cf.reason
+                    ">>> session {} sent close with code {} and reason `{}`",
+                    session.session_id, cf.code, cf.reason
                 );
             } else {
-                println!(">>> {who} somehow sent close message without CloseFrame");
+                println!(
+                    ">>> user {} somehow sent close message without CloseFrame",
+                    session.user_id
+                );
             }
             return ControlFlow::Break(());
         }
 
         Message::Pong(v) => {
-            println!(">>> {who} sent pong with {v:?}");
+            println!(">>> session {} sent pong with {v:?}", session.user_id);
         }
         // You should never need to manually handle Message::Ping, as axum's websocket library
         // will do so for you automagically by replying with Pong and copying the v according to
         // spec. But if you need the contents of the pings you can see them here.
         Message::Ping(v) => {
-            println!(">>> {who} sent ping with {v:?}");
+            println!(">>> session {} sent ping with {v:?}", session.user_id);
         }
     }
     ControlFlow::Continue(())
@@ -345,12 +377,13 @@ async fn handle_login(
 
 #[cfg(test)]
 mod tests {
-    use axum::{Extension, http::StatusCode};
+    use axum::http::StatusCode;
     use axum_test::{TestServer, Transport};
     #[allow(unused_imports)]
     use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
     use serde_json::json;
-    use std::net::{Ipv4Addr, SocketAddr};
+    use std::time::Duration;
+    use tokio::time::timeout;
 
     use super::*;
 
@@ -549,6 +582,65 @@ mod tests {
         assert_eq!(msg, OutMsg::NewTasks(Tasks::single_task()));
     }
 
+    #[tokio::test]
+    async fn unit_two_users_logged_do_not_get_updates_from_the_other() {
+        let server = test_server_http();
+
+        let user1 = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        let user2 = json!({
+            "username": "testuser2",
+            "password": "testpass2"
+        });
+        server.post("/api/register").json(&user1).await;
+        server.post("/api/register").json(&user2).await;
+
+        let client1 = server.post("/api/login").json(&user1).await;
+        let client2 = server.post("/api/login").json(&user2).await;
+        let mut ws1 = server
+            .get_websocket("/ws")
+            .add_cookie(client1.cookie("session"))
+            .await
+            .into_websocket()
+            .await;
+        let mut ws2 = server
+            .get_websocket("/ws")
+            .add_cookie(client2.cookie("session"))
+            .await
+            .into_websocket()
+            .await;
+
+        let _msg = ws1.receive_outmsg().await;
+        let _msg = ws2.receive_outmsg().await;
+
+        let user1_tasks = Tasks {
+            tasks: vec![Task {
+                id: 0,
+                summary: "Task 1".to_string(),
+            }],
+            next_id: 1,
+        };
+
+        let user2_tasks = Tasks {
+            tasks: vec![Task {
+                id: 0,
+                summary: "different task".to_string(),
+            }],
+            next_id: 1,
+        };
+
+        ws1.send_inmsg(InMsg::Tasks(user1_tasks)).await;
+        ws2.send_inmsg(InMsg::Tasks(user2_tasks)).await;
+
+        let msg1 = ws1.receive_outmsg().await;
+        let msg2 = ws2.receive_outmsg().await;
+
+        assert_ne!(msg1, msg2);
+    }
+
     fn test_server() -> TestServer {
         let temp = std::env::temp_dir();
         let app_state = AppState::default();
@@ -560,11 +652,7 @@ mod tests {
     fn test_server_http() -> TestServer {
         let temp = std::env::temp_dir();
         let app_state = AppState::default();
-
-        let app = make_app(temp, app_state).layer(Extension(ConnectInfo(SocketAddr::from((
-            Ipv4Addr::LOCALHOST,
-            8080,
-        )))));
+        let app = make_app(temp, app_state);
 
         let mut config = axum_test::TestServerConfig::new();
         config.save_cookies = true;
@@ -591,12 +679,20 @@ mod tests {
     }
     impl TestWebSocketExt for axum_test::TestWebSocket {
         async fn receive_outmsg(&mut self) -> OutMsg {
-            self.receive_json::<OutMsg>().await
+            timeout(Duration::from_millis(10), async move {
+                self.receive_json::<OutMsg>().await
+            })
+            .await
+            .unwrap()
         }
 
         async fn send_inmsg(&mut self, msg: impl Into<InMsg>) {
-            self.send_text(&serde_json::to_string(&msg.into()).unwrap())
-                .await;
+            timeout(Duration::from_millis(10), async move {
+                self.send_text(&serde_json::to_string(&msg.into()).unwrap())
+                    .await
+            })
+            .await
+            .unwrap();
         }
     }
 }

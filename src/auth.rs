@@ -47,6 +47,14 @@ impl Users {
     pub fn get_session(&self, session_id: SessionId) -> Option<UserId> {
         self.sessions.get(&session_id).copied()
     }
+
+    pub fn get_sessions(&self, id: UserId) -> Vec<SessionId> {
+        self.sessions
+            .iter()
+            .filter(|(_session, user_id)| **user_id == id)
+            .map(|(id, _)| *id)
+            .collect()
+    }
 }
 
 impl UserData {
