@@ -18,7 +18,6 @@ import Html.Styled
 import Html.Styled.Attributes
     exposing
         ( attribute
-        , css
         , for
         , href
         , id
@@ -26,11 +25,10 @@ import Html.Styled.Attributes
         , type_
         , value
         )
-import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
+import Html.Styled.Events exposing (onInput, onSubmit)
 import Http
-import Json.Decode as Decode
 import Json.Encode as Encode
-import Route exposing (Route)
+import Route
 
 
 type Model

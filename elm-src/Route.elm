@@ -1,7 +1,7 @@
 module Route exposing (Route(..), encodeRoute, parseRoute)
 
 import Url
-import Url.Parser exposing ((</>), Parser, int, map, oneOf, parse, s)
+import Url.Parser exposing ((</>), Parser, map, oneOf, parse, s)
 
 
 type Route

@@ -1,6 +1,6 @@
 module PortsTest exposing (..)
 
-import Expect exposing (Expectation)
+import Expect
 import Json.Encode as Encode
 import Ports exposing (InMessage(..), decodeIncomingMessage)
 import Tasks as T

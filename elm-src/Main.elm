@@ -9,7 +9,6 @@ import Html.Styled
         , a
         , button
         , div
-        , input
         , li
         , main_
         , nav
@@ -17,7 +16,7 @@ import Html.Styled
         , toUnstyled
         , ul
         )
-import Html.Styled.Attributes exposing (css, href, type_)
+import Html.Styled.Attributes exposing (css, href)
 import Html.Styled.Events exposing (onClick)
 import Login
 import Ports as P exposing (connectWebsocket)
@@ -196,12 +195,11 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    case model.loggedIn of
-        True ->
-            P.recv Recv PortError
+    if model.loggedIn then
+        P.recv Recv PortError
 
-        False ->
-            Sub.none
+    else
+        Sub.none
 
 
 
@@ -222,16 +220,15 @@ body : Model -> Html Msg
 body model =
     div []
         [ nav [] <|
-            case model.loggedIn of
-                True ->
-                    [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
-                    , button [ onClick Logout ] [ text "Logout" ]
-                    ]
+            if model.loggedIn then
+                [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
+                , button [ onClick Logout ] [ text "Logout" ]
+                ]
 
-                False ->
-                    [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
-                    , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
-                    ]
+            else
+                [ a [ href <| Route.encodeRoute Route.Home ] [ text "Home" ]
+                , a [ href <| Route.encodeRoute Route.Login ] [ text "Login" ]
+                ]
         , content model
         ]
 
@@ -255,22 +252,21 @@ content model =
 nextTasksView : Model -> Html Msg
 nextTasksView model =
     main_ [] <|
-        case model.loggedIn of
-            True ->
-                [ ul [ css [ listStyleType none ] ]
-                    (List.map
-                        (\task -> li [] [ text task.summary ])
-                        model.tasks.tasks
-                    )
-                , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
-                , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
-                ]
+        if model.loggedIn then
+            [ ul [ css [ listStyleType none ] ]
+                (List.map
+                    (\task -> li [] [ text task.summary ])
+                    model.tasks.tasks
+                )
+            , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
+            , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
+            ]
 
-            False ->
-                [ ul [ css [ listStyleType none ] ]
-                    (List.map
-                        (\task -> li [] [ text task.summary ])
-                        model.tasks.tasks
-                    )
-                , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
-                ]
+        else
+            [ ul [ css [ listStyleType none ] ]
+                (List.map
+                    (\task -> li [] [ text task.summary ])
+                    model.tasks.tasks
+                )
+            , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
+            ]
