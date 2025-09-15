@@ -159,14 +159,9 @@ async fn handle_socket(socket: WebSocket, session: AuthedUser, app_state: AppSta
         let tasks_map = app_state.tasks.lock().await;
         let ts = Tasks::default();
         let tasks = tasks_map.get(&session.user_id).unwrap_or(&ts);
-        let mut send = sender.lock().await;
-        let sent = send
-            .send(Message::Text(
-                serde_json::to_string(&OutMsg::NewTasks(tasks.clone()))
-                    .unwrap()
-                    .into(),
-            ))
-            .await;
+        let send = sender.lock().await;
+        let new_tasks = OutMsg::NewTasks(tasks.clone());
+        let sent = send_outmsg(send, new_tasks).await;
         if let Err(e) = sent {
             tracing::error!(
                 "Failed to send initial tasks to user {}: {}",
@@ -179,21 +174,13 @@ async fn handle_socket(socket: WebSocket, session: AuthedUser, app_state: AppSta
     // This second task will receive messages from client and print them on server console
     let app_state_clone = app_state.clone();
     let recv_task = tokio::spawn(async move {
-        let mut cnt = 0;
         while let Some(Ok(msg)) = receiver.next().await {
-            cnt += 1;
-            // print message and break if instructed to do so
-            if process_message(msg, session, sender.clone(), app_state_clone.clone())
-                .await
-                .is_break()
-            {
-                break;
-            }
+            process_message(msg, session, sender.clone(), app_state_clone.clone()).await?;
         }
-        cnt
+        ControlFlow::Continue(())
     });
 
-    recv_task.await.unwrap();
+    let _ = recv_task.await.unwrap();
 
     app_state.clients.lock().await.remove(&session.session_id);
 
@@ -201,6 +188,16 @@ async fn handle_socket(socket: WebSocket, session: AuthedUser, app_state: AppSta
         "Websocket context for session {} destroyed",
         session.session_id
     );
+}
+
+async fn send_outmsg(
+    mut send: tokio::sync::MutexGuard<'_, SplitSink<WebSocket, Message>>,
+    new_tasks: OutMsg,
+) -> Result<(), axum::Error> {
+    send.send(Message::Text(
+        serde_json::to_string(&new_tasks).unwrap().into(),
+    ))
+    .await
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
