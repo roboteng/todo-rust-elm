@@ -34,28 +34,43 @@ use futures_util::{
 
 type WsSender = Arc<Mutex<SplitSink<WebSocket, Message>>>;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct AppState {
     tasks: Arc<Mutex<HashMap<UserId, Tasks>>>,
     clients: Arc<Mutex<HashMap<SessionId, WsSender>>>,
     users: Arc<Mutex<Users>>,
+    key: Key,
+}
+
+impl AppState {
+    pub fn new(key: [u8; 64]) -> Self {
+        let key = Key::from(&key);
+        Self {
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            users: Arc::new(Mutex::new(Users::default())),
+            key,
+        }
+    }
 }
 
 impl FromRef<AppState> for Key {
-    fn from_ref(_input: &AppState) -> Self {
-        Key::from(&[42; 64])
+    fn from_ref(input: &AppState) -> Self {
+        input.key.clone()
     }
 }
 
 pub struct Env {
     pub port: u16,
     pub host: String,
+    pub cookie_secret: String,
 }
 
 pub async fn run_app(env: Env) {
     let assets_dir = PathBuf::from(".").join("assets");
 
-    let app_state = AppState::default();
+    let key = env.cookie_secret.as_bytes().first_chunk().unwrap();
+    let app_state = AppState::new(*key);
 
     let app = make_app(assets_dir, app_state);
 
@@ -643,7 +658,7 @@ mod tests {
 
     fn test_server() -> TestServer {
         let temp = std::env::temp_dir();
-        let app_state = AppState::default();
+        let app_state = AppState::new([42; 64]);
         let app = make_app(temp, app_state);
 
         TestServer::new(app).unwrap()
@@ -651,7 +666,7 @@ mod tests {
 
     fn test_server_http() -> TestServer {
         let temp = std::env::temp_dir();
-        let app_state = AppState::default();
+        let app_state = AppState::new([42; 64]);
         let app = make_app(temp, app_state);
 
         let mut config = axum_test::TestServerConfig::new();

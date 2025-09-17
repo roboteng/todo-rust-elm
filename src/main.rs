@@ -7,9 +7,11 @@ mod auth;
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     let env = Env {
         port: 3000,
         host: "0.0.0.0".to_string(),
+        cookie_secret: std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET must be set"),
     };
 
     tracing_subscriber::registry()
