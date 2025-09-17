@@ -346,7 +346,10 @@ async fn handle_register(
     Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     let mut users = state.users.lock().await;
-    match users.try_add(UserData::new(req.username, req.password)) {
+    match UserData::new(req.username, req.password)
+        .ok()
+        .and_then(|user| users.try_add(user))
+    {
         Some(_) => StatusCode::CREATED,
         None => StatusCode::CONFLICT,
     }

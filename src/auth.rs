@@ -1,8 +1,12 @@
+use bcrypt_pbkdf::bcrypt_pbkdf;
 use rand::random;
 use std::collections::{HashMap, hash_map::Entry};
 
 pub type UserId = u64;
 pub type SessionId = u64;
+type PassHash = [u8; 32];
+type Salt = [u8; 32];
+const BCRYPT_ROUNDS: u32 = 10;
 
 #[derive(Debug, Clone, Default)]
 pub struct Users {
@@ -13,7 +17,8 @@ pub struct Users {
 #[derive(Debug, Clone)]
 pub struct UserData {
     username: String,
-    password: String,
+    pass_hash: PassHash,
+    salt: Salt,
 }
 
 impl Users {
@@ -37,7 +42,17 @@ impl Users {
         let user_id = self
             .users
             .iter()
-            .find(|u| u.1.username == username && u.1.password == password)
+            .find(|u| {
+                if u.1.username == username {
+                    // TODO: fix for possible timing attack
+                    let user = u.1;
+                    let mut pass_hash = PassHash::default();
+                    bcrypt_pbkdf(&password, &user.salt, BCRYPT_ROUNDS, &mut pass_hash).unwrap();
+                    pass_hash == user.pass_hash
+                } else {
+                    false
+                }
+            })
             .map(|(id, _)| *id)?;
         let session_id = random();
         self.sessions.insert(session_id, user_id);
@@ -57,8 +72,20 @@ impl Users {
     }
 }
 
+pub enum AccountCreationError {
+    PasswordTooShort,
+}
+
 impl UserData {
-    pub fn new(username: String, password: String) -> Self {
-        Self { username, password }
+    pub fn new(username: String, password: String) -> Result<Self, AccountCreationError> {
+        let salt: Salt = random();
+        let mut pass_hash = PassHash::default();
+        bcrypt_pbkdf(&password, &salt, BCRYPT_ROUNDS, &mut pass_hash)
+            .map_err(|_| AccountCreationError::PasswordTooShort)?;
+        Ok(Self {
+            username,
+            pass_hash,
+            salt,
+        })
     }
 }
