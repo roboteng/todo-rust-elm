@@ -70,6 +70,10 @@ impl Users {
             .map(|(id, _)| *id)
             .collect()
     }
+
+    pub fn logout_session(&mut self, session_id: SessionId) {
+        self.sessions.remove(&session_id);
+    }
 }
 
 pub enum AccountCreationError {

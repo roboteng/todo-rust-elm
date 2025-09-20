@@ -18,6 +18,7 @@ import Html.Styled
         )
 import Html.Styled.Attributes exposing (css, href)
 import Html.Styled.Events exposing (onClick)
+import Http
 import Login
 import Ports as P exposing (connectWebsocket)
 import Register
@@ -94,6 +95,7 @@ type Msg
     | RegisterMsg Register.Msg
     | LoginMsg Login.Msg
     | Logout
+    | LogoutResponse (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -190,7 +192,22 @@ update msg model =
                     ( model, Cmd.none )
 
         Logout ->
-            ( { model | loggedIn = False }, connectWebsocket False )
+            ( model
+            , Http.post
+                { url = "/api/logout"
+                , body = Http.emptyBody
+                , expect = Http.expectWhatever LogoutResponse
+                }
+            )
+
+        LogoutResponse result ->
+            case result of
+                Ok _ ->
+                    ( { model | loggedIn = False }, connectWebsocket False )
+
+                Err _ ->
+                    -- Even if logout fails on server, still log out client-side
+                    ( { model | loggedIn = False }, connectWebsocket False )
 
 
 subscriptions : Model -> Sub Msg

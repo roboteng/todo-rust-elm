@@ -95,6 +95,7 @@ fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
         .route("/ws", any(ws_handler))
         .route("/api/register", post(handle_register))
         .route("/api/login", post(handle_login))
+        .route("/api/logout", post(handle_logout))
         .with_state(app_state)
         .layer(
             TraceLayer::new_for_http()
@@ -398,6 +399,19 @@ async fn handle_login(
     }
 }
 
+#[axum::debug_handler]
+#[instrument(skip_all)]
+async fn handle_logout(
+    State(state): State<AppState>,
+    jar: PrivateCookieJar,
+    session: AuthedUser,
+) -> impl IntoResponse {
+    let mut users = state.users.lock().await;
+    users.logout_session(session.session_id);
+    let jar = jar.remove("session");
+    (jar, StatusCode::NO_CONTENT).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
@@ -662,6 +676,25 @@ mod tests {
         let msg2 = ws2.receive_outmsg().await;
 
         assert_ne!(msg1, msg2);
+    }
+
+    #[tokio::test]
+    async fn unit_logout() {
+        let server = test_server_http();
+
+        let user_data = json!({
+            "username": "testuser",
+            "password": "testpass"
+        });
+
+        server.post("/api/register").json(&user_data).await;
+        let _ = server.post("/api/login").json(&user_data).await;
+
+        let logout_response = server.post("/api/logout");
+        logout_response.await.assert_status(StatusCode::NO_CONTENT);
+
+        let response = server.get_websocket("/ws").await;
+        response.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     fn test_server() -> TestServer {
