@@ -18,6 +18,7 @@ use axum_extra::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tracing::instrument;
 
 use std::ops::ControlFlow;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -142,6 +143,7 @@ impl FromRequestParts<AppState> for AuthedUser {
 /// This is the last point where we can extract TCP/IP metadata such as IP address of the client
 /// as well as things from HTTP headers such as user-agent of the browser etc.
 #[axum::debug_handler]
+#[instrument(skip(ws, app_state, user_agent))]
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(app_state): State<AppState>,
@@ -157,6 +159,7 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, user, app_state))
 }
 
+#[instrument(skip(socket, app_state))]
 async fn handle_socket(socket: WebSocket, session: AuthedUser, app_state: AppState) {
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
@@ -209,6 +212,7 @@ async fn send_outmsg(
     mut send: tokio::sync::MutexGuard<'_, SplitSink<WebSocket, Message>>,
     new_tasks: OutMsg,
 ) -> Result<(), axum::Error> {
+    tracing::debug!(?new_tasks);
     send.send(Message::Text(
         serde_json::to_string(&new_tasks).unwrap().into(),
     ))
@@ -247,6 +251,7 @@ enum InMsg {
 
 type Shared<T> = Arc<Mutex<T>>;
 
+#[instrument(skip(app_state))]
 async fn broadcast_tasks(app_state: &AppState, user_id: u64) {
     let tasks_stored = app_state.tasks.lock().await;
     let tasks = match tasks_stored.get(&user_id) {
@@ -284,6 +289,7 @@ async fn broadcast_tasks(app_state: &AppState, user_id: u64) {
 }
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
+#[instrument(skip(_sender, app_state))]
 async fn process_message(
     msg: Message,
     session: AuthedUser,
@@ -356,6 +362,7 @@ struct RegisterRequest {
 }
 
 #[axum::debug_handler]
+#[instrument(skip_all)]
 async fn handle_register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
@@ -371,6 +378,7 @@ async fn handle_register(
 }
 
 #[axum::debug_handler]
+#[instrument(skip_all)]
 async fn handle_login(
     State(state): State<AppState>,
     jar: PrivateCookieJar,
