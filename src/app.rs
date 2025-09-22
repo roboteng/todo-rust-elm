@@ -220,11 +220,6 @@ async fn send_outmsg(
     .await
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-struct NewTask {
-    summary: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct Task {
     id: i32,
