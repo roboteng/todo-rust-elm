@@ -1,4 +1,4 @@
-module Register exposing (Model, Msg(..), init, update, view)
+module Register exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 import Browser.Navigation as Nav
 import Html.Styled
@@ -31,12 +31,16 @@ import Json.Encode as Encode
 import Route
 
 
+type OutMsg
+    = PushRoute Route.Route
+    | None
+
+
 type Model
     = M
         { username : String
         , password : String
         , message : Maybe String
-        , key : Nav.Key
         }
 
 
@@ -47,46 +51,47 @@ type Msg
     | Response (Result Http.Error ())
 
 
-init : Nav.Key -> Model
-init key =
+init : Model
+init =
     M
         { username = ""
         , password = ""
         , message = Nothing
-        , key = key
         }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg (M model) =
     case msg of
         UpdateUsername username ->
-            ( M { model | username = username }, Cmd.none )
+            ( M { model | username = username }, Cmd.none, None )
 
         UpdatePassword password ->
-            ( M { model | password = password }, Cmd.none )
+            ( M { model | password = password }, Cmd.none, None )
 
         Submit ->
-            ( init model.key
+            ( init
             , Http.post
                 { url = "/api/register"
                 , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string model.username ), ( "password", Encode.string model.password ) ]
                 , expect = Http.expectWhatever Response
                 }
+            , None
             )
 
         Response result ->
             case result of
                 Ok _ ->
                     ( M { model | message = Just "Account Created" }
-                    , Nav.pushUrl model.key <| Route.encodeRoute Route.Login
+                    , Cmd.none
+                    , PushRoute Route.Login
                     )
 
                 Err (Http.BadStatus 409) ->
-                    ( M { model | message = Just "Username already exists, pick a different one" }, Cmd.none )
+                    ( M { model | message = Just "Username already exists, pick a different one" }, Cmd.none, None )
 
                 Err _ ->
-                    ( M { model | message = Just "Some error occurred" }, Cmd.none )
+                    ( M { model | message = Just "Some error occurred" }, Cmd.none, None )
 
 
 view : Model -> Html Msg

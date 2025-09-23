@@ -1,6 +1,5 @@
 module Login exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
-import Browser.Navigation as Nav
 import Html.Styled
     exposing
         ( Html
@@ -36,7 +35,6 @@ type Model
         { username : String
         , password : String
         , message : Maybe String
-        , key : Nav.Key
         }
 
 
@@ -49,16 +47,17 @@ type Msg
 
 type OutMsg
     = LoggedIn
+    | PushUrl String
+    | Batch (List OutMsg)
     | None
 
 
-init : Nav.Key -> Model
-init key =
+init : Model
+init =
     M
         { username = ""
         , password = ""
         , message = Nothing
-        , key = key
         }
 
 
@@ -72,7 +71,7 @@ update msg (M model) =
             ( M { model | password = password }, Cmd.none, None )
 
         Submit ->
-            ( init model.key
+            ( init
             , Http.post
                 { url = "/api/login"
                 , body = Http.jsonBody <| Encode.object [ ( "username", Encode.string model.username ), ( "password", Encode.string model.password ) ]
@@ -85,8 +84,8 @@ update msg (M model) =
             case result of
                 Ok _ ->
                     ( M { model | message = Just "You're now logged in!" }
-                    , Nav.pushUrl model.key <| Route.encodeRoute Route.Home
-                    , LoggedIn
+                    , Cmd.none
+                    , Batch [ LoggedIn, PushUrl <| Route.encodeRoute Route.Home ]
                     )
 
                 Err (Http.BadStatus 401) ->

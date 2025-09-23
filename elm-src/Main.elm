@@ -40,7 +40,7 @@ main =
 
 
 type alias Model =
-    { key : Nav.Key
+    { pushUrl : String -> Cmd Msg
     , tasks : Tasks.Tasks
     , newTask : Tasks.NewTask
     , error : Maybe String
@@ -58,7 +58,7 @@ type Page
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
-    ( { key = key
+    ( { pushUrl = \u -> Nav.pushUrl key u
       , tasks =
             Tasks.empty
       , newTask =
@@ -74,10 +74,10 @@ init _ url key =
                     New
 
                 Route.Register ->
-                    Register <| Register.init key
+                    Register <| Register.init
 
                 Route.Login ->
-                    Login <| Login.init key
+                    Login <| Login.init
       , loggedIn = False
       }
     , P.connectWebsocket False
@@ -107,7 +107,7 @@ update msg model =
         UrlRequested urlRequest ->
             case urlRequest of
                 Browser.Internal url ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+                    ( model, model.pushUrl (Url.toString url) )
 
                 Browser.External href ->
                     ( model, Nav.load href )
@@ -123,10 +123,10 @@ update msg model =
                             New
 
                         Route.Register ->
-                            Register <| Register.init model.key
+                            Register <| Register.init
 
                         Route.Login ->
-                            Login <| Login.init model.key
+                            Login <| Login.init
             in
             ( { model | page = page }
             , Cmd.none
@@ -163,10 +163,18 @@ update msg model =
             case model.page of
                 Register mdl ->
                     let
-                        ( newModel, cmd ) =
+                        ( newModel, cmd, outMsg ) =
                             Register.update m mdl
+
+                        navCommand =
+                            case outMsg of
+                                Register.PushRoute route ->
+                                    model.pushUrl <| Route.encodeRoute route
+
+                                Register.None ->
+                                    Cmd.none
                     in
-                    ( { model | page = Register newModel }, Cmd.map RegisterMsg cmd )
+                    ( { model | page = Register newModel }, Cmd.batch [ Cmd.map RegisterMsg cmd, navCommand ] )
 
                 _ ->
                     ( model, Cmd.none )
@@ -178,14 +186,13 @@ update msg model =
                         ( newModel, cmd, outMsg ) =
                             Login.update m mdl
 
-                        loggedIn =
-                            outMsg == Login.LoggedIn
+                        ( newParentModel, outCmd ) =
+                            handleLoginMsg model outMsg
                     in
-                    ( { model
+                    ( { newParentModel
                         | page = Login newModel
-                        , loggedIn = loggedIn
                       }
-                    , Cmd.batch [ Cmd.map LoginMsg cmd, connectWebsocket loggedIn ]
+                    , Cmd.batch [ Cmd.map LoginMsg cmd, outCmd ]
                     )
 
                 _ ->
@@ -208,6 +215,31 @@ update msg model =
                 Err _ ->
                     -- Even if logout fails on server, still log out client-side
                     ( { model | loggedIn = False }, connectWebsocket False )
+
+
+handleLoginMsg : Model -> Login.OutMsg -> ( Model, Cmd Msg )
+handleLoginMsg model outMsg =
+    case outMsg of
+        Login.None ->
+            ( model, Cmd.none )
+
+        Login.LoggedIn ->
+            ( { model | loggedIn = True }, connectWebsocket True )
+
+        Login.PushUrl url ->
+            ( model, model.pushUrl url )
+
+        Login.Batch msgs ->
+            List.foldl
+                (\msg ( mdl, cmd ) ->
+                    let
+                        ( newModel, c ) =
+                            handleLoginMsg mdl msg
+                    in
+                    ( newModel, Cmd.batch [ cmd, c ] )
+                )
+                ( model, Cmd.none )
+                msgs
 
 
 subscriptions : Model -> Sub Msg
