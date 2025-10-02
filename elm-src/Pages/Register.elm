@@ -1,4 +1,4 @@
-module Register exposing (Model, Msg(..), OutMsg(..), init, update, view)
+module Pages.Register exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 import Browser.Navigation as Nav
 import Html.Styled

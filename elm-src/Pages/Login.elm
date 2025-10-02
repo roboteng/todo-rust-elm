@@ -1,4 +1,4 @@
-module Login exposing (Model, Msg(..), OutMsg(..), init, update, view)
+module Pages.Login exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 import Html.Styled
     exposing

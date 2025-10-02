@@ -19,9 +19,10 @@ import Html.Styled
 import Html.Styled.Attributes exposing (css, href)
 import Html.Styled.Events exposing (onClick)
 import Http
-import Login
+import Pages.Home as Home
+import Pages.Login as Login
+import Pages.Register as Register
 import Ports as P exposing (connectWebsocket)
-import Register
 import Route exposing (Route(..), parseRoute)
 import Tasks
 import Url
@@ -50,7 +51,7 @@ type alias Model =
 
 
 type Page
-    = Home
+    = Home Home.Model
     | New
     | Register Register.Model
     | Login Login.Model
@@ -68,7 +69,7 @@ init _ url key =
       , page =
             case Route.parseRoute url of
                 Route.Home ->
-                    Home
+                    Home <| Home.init { loggedIn = False, tasks = Tasks.empty }
 
                 Route.New ->
                     New
@@ -94,6 +95,7 @@ type Msg
     | PortError String
     | RegisterMsg Register.Msg
     | LoginMsg Login.Msg
+    | HomeMsg Home.Msg
     | Logout
     | LogoutResponse (Result Http.Error ())
 
@@ -117,7 +119,7 @@ update msg model =
                 page =
                     case parseRoute url of
                         Route.Home ->
-                            Home
+                            Home <| Home.init { loggedIn = model.loggedIn, tasks = model.tasks }
 
                         Route.New ->
                             New
@@ -198,6 +200,26 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        HomeMsg message ->
+            case model.page of
+                Home m ->
+                    let
+                        ( newModel, command, outMsg ) =
+                            Home.update { loggedIn = model.loggedIn, tasks = model.tasks } message m
+
+                        c =
+                            case outMsg of
+                                Home.None ->
+                                    Cmd.none
+
+                                Home.Sync ->
+                                    P.send <| P.Tasks model.tasks
+                    in
+                    ( { model | page = Home newModel }, Cmd.batch [ c, Cmd.map HomeMsg command ] )
+
+                _ ->
+                    ( model, Cmd.none )
+
         Logout ->
             ( model
             , Http.post
@@ -207,14 +229,12 @@ update msg model =
                 }
             )
 
-        LogoutResponse result ->
-            case result of
-                Ok _ ->
-                    ( { model | loggedIn = False }, connectWebsocket False )
+        LogoutResponse (Ok _) ->
+            ( { model | loggedIn = False }, connectWebsocket False )
 
-                Err _ ->
-                    -- Even if logout fails on server, still log out client-side
-                    ( { model | loggedIn = False }, connectWebsocket False )
+        LogoutResponse (Err _) ->
+            -- Even if logout fails on server, still log out client-side
+            ( { model | loggedIn = False }, connectWebsocket False )
 
 
 handleLoginMsg : Model -> Login.OutMsg -> ( Model, Cmd Msg )
@@ -230,16 +250,21 @@ handleLoginMsg model outMsg =
             ( model, model.pushUrl url )
 
         Login.Batch msgs ->
-            List.foldl
-                (\msg ( mdl, cmd ) ->
-                    let
-                        ( newModel, c ) =
-                            handleLoginMsg mdl msg
-                    in
-                    ( newModel, Cmd.batch [ cmd, c ] )
-                )
-                ( model, Cmd.none )
-                msgs
+            batchHelp handleLoginMsg model msgs
+
+
+batchHelp : (Model -> a -> ( Model, Cmd Msg )) -> Model -> List a -> ( Model, Cmd Msg )
+batchHelp f model msgs =
+    List.foldl
+        (\msg ( mdl, cmd ) ->
+            let
+                ( newModel, c ) =
+                    f mdl msg
+            in
+            ( newModel, Cmd.batch [ cmd, c ] )
+        )
+        ( model, Cmd.none )
+        msgs
 
 
 subscriptions : Model -> Sub Msg
@@ -285,8 +310,8 @@ body model =
 content : Model -> Html Msg
 content model =
     case model.page of
-        Home ->
-            nextTasksView model
+        Home m ->
+            Html.Styled.map HomeMsg <| Home.view m
 
         New ->
             Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
@@ -296,26 +321,3 @@ content model =
 
         Register m ->
             Html.Styled.map RegisterMsg <| Register.view m
-
-
-nextTasksView : Model -> Html Msg
-nextTasksView model =
-    main_ [] <|
-        if model.loggedIn then
-            [ ul [ css [ listStyleType none ] ]
-                (List.map
-                    (\task -> li [] [ text task.summary ])
-                    model.tasks.tasks
-                )
-            , button [ onClick <| SendTasks model.tasks ] [ text "Send Tasks to Server" ]
-            , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
-            ]
-
-        else
-            [ ul [ css [ listStyleType none ] ]
-                (List.map
-                    (\task -> li [] [ text task.summary ])
-                    model.tasks.tasks
-                )
-            , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
-            ]
