@@ -30,7 +30,7 @@ type alias Context =
 type Model
     = M
         { loggedIn : Bool
-        , tasks : Tasks.Tasks
+        , tasks : List Tasks.Task
         }
 
 
@@ -47,7 +47,7 @@ init : Context -> Model
 init context =
     M
         { loggedIn = context.loggedIn
-        , tasks = context.tasks
+        , tasks = Tasks.allTasks context.tasks
         }
 
 
@@ -65,7 +65,7 @@ view (M model) =
             [ ul [ css [ listStyleType none ] ]
                 (List.map
                     (\task -> li [] [ text task.summary ])
-                    model.tasks.tasks
+                    model.tasks
                 )
             , button [ onClick <| SyncTasksClicked ] [ text "Sync Tasks" ]
             , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
@@ -75,7 +75,7 @@ view (M model) =
             [ ul [ css [ listStyleType none ] ]
                 (List.map
                     (\task -> li [] [ text task.summary ])
-                    model.tasks.tasks
+                    model.tasks
                 )
             , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
             ]

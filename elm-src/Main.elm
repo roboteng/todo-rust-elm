@@ -21,6 +21,7 @@ import Html.Styled.Events exposing (onClick)
 import Http
 import Pages.Home as Home
 import Pages.Login as Login
+import Pages.NewTask as NewTask
 import Pages.Register as Register
 import Ports as P exposing (connectWebsocket)
 import Route exposing (Route(..), parseRoute)
@@ -43,7 +44,6 @@ main =
 type alias Model =
     { pushUrl : String -> Cmd Msg
     , tasks : Tasks.Tasks
-    , newTask : Tasks.NewTask
     , error : Maybe String
     , page : Page
     , loggedIn : Bool
@@ -52,7 +52,7 @@ type alias Model =
 
 type Page
     = Home Home.Model
-    | New
+    | New NewTask.Model
     | Register Register.Model
     | Login Login.Model
 
@@ -62,9 +62,6 @@ init _ url key =
     ( { pushUrl = \u -> Nav.pushUrl key u
       , tasks =
             Tasks.empty
-      , newTask =
-            { summary = ""
-            }
       , error = Nothing
       , page =
             case Route.parseRoute url of
@@ -72,7 +69,7 @@ init _ url key =
                     Home <| Home.init { loggedIn = False, tasks = Tasks.empty }
 
                 Route.New ->
-                    New
+                    New <| NewTask.init
 
                 Route.Register ->
                     Register <| Register.init
@@ -90,7 +87,7 @@ type Msg
     | UrlRequested Browser.UrlRequest
     | UrlChanged Url.Url
     | SendTasks Tasks.Tasks
-    | NewTaskMsg Tasks.Msg
+    | NewTaskMsg NewTask.Msg
     | Recv P.InMessage
     | PortError String
     | RegisterMsg Register.Msg
@@ -102,11 +99,11 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        None ->
+    case ( msg, model.page ) of
+        ( None, _ ) ->
             ( model, Cmd.none )
 
-        UrlRequested urlRequest ->
+        ( UrlRequested urlRequest, _ ) ->
             case urlRequest of
                 Browser.Internal url ->
                     ( model, model.pushUrl (Url.toString url) )
@@ -114,7 +111,7 @@ update msg model =
                 Browser.External href ->
                     ( model, Nav.load href )
 
-        UrlChanged url ->
+        ( UrlChanged url, _ ) ->
             let
                 page =
                     case parseRoute url of
@@ -122,7 +119,7 @@ update msg model =
                             Home <| Home.init { loggedIn = model.loggedIn, tasks = model.tasks }
 
                         Route.New ->
-                            New
+                            New <| NewTask.init
 
                         Route.Register ->
                             Register <| Register.init
@@ -134,93 +131,90 @@ update msg model =
             , Cmd.none
             )
 
-        SendTasks ts ->
+        ( SendTasks ts, _ ) ->
             ( model
             , P.send <| P.Tasks ts
             )
 
-        NewTaskMsg m ->
+        ( NewTaskMsg message, New pageModel ) ->
             let
                 ( newModel, cmd ) =
-                    Tasks.update m model.newTask
+                    NewTask.update message pageModel
             in
             case cmd of
-                Tasks.None ->
-                    ( { model | newTask = newModel }, Cmd.none )
+                NewTask.None ->
+                    ( { model | page = New newModel }, Cmd.none )
 
-                Tasks.NewTaskCreated task ->
-                    ( { model | newTask = newModel, tasks = Tasks.newTask model.tasks task }, Cmd.none )
+                NewTask.NewTaskCreated task ->
+                    ( { model | page = New newModel, tasks = Tasks.newTask model.tasks task }, Cmd.none )
 
-        Recv inMsg ->
+        ( NewTaskMsg _, _ ) ->
+            ( model, Cmd.none )
+
+        ( Recv inMsg, _ ) ->
             case inMsg of
                 P.NewTasks ts ->
                     ( { model | tasks = ts }
                     , Cmd.none
                     )
 
-        PortError e ->
+        ( PortError e, _ ) ->
             ( { model | error = Just e }, Cmd.none )
 
-        RegisterMsg m ->
-            case model.page of
-                Register mdl ->
-                    let
-                        ( newModel, cmd, outMsg ) =
-                            Register.update m mdl
+        ( RegisterMsg m, Register pageModel ) ->
+            let
+                ( newModel, cmd, outMsg ) =
+                    Register.update m pageModel
 
-                        navCommand =
-                            case outMsg of
-                                Register.PushRoute route ->
-                                    model.pushUrl <| Route.encodeRoute route
+                navCommand =
+                    case outMsg of
+                        Register.PushRoute route ->
+                            model.pushUrl <| Route.encodeRoute route
 
-                                Register.None ->
-                                    Cmd.none
-                    in
-                    ( { model | page = Register newModel }, Cmd.batch [ Cmd.map RegisterMsg cmd, navCommand ] )
+                        Register.None ->
+                            Cmd.none
+            in
+            ( { model | page = Register newModel }, Cmd.batch [ Cmd.map RegisterMsg cmd, navCommand ] )
 
-                _ ->
-                    ( model, Cmd.none )
+        ( RegisterMsg _, _ ) ->
+            ( model, Cmd.none )
 
-        LoginMsg m ->
-            case model.page of
-                Login mdl ->
-                    let
-                        ( newModel, cmd, outMsg ) =
-                            Login.update m mdl
+        ( LoginMsg m, Login pageModel ) ->
+            let
+                ( newModel, cmd, outMsg ) =
+                    Login.update m pageModel
 
-                        ( newParentModel, outCmd ) =
-                            handleLoginMsg model outMsg
-                    in
-                    ( { newParentModel
-                        | page = Login newModel
-                      }
-                    , Cmd.batch [ Cmd.map LoginMsg cmd, outCmd ]
-                    )
+                ( newParentModel, outCmd ) =
+                    handleLoginMsg model outMsg
+            in
+            ( { newParentModel
+                | page = Login newModel
+              }
+            , Cmd.batch [ Cmd.map LoginMsg cmd, outCmd ]
+            )
 
-                _ ->
-                    ( model, Cmd.none )
+        ( LoginMsg _, _ ) ->
+            ( model, Cmd.none )
 
-        HomeMsg message ->
-            case model.page of
-                Home m ->
-                    let
-                        ( newModel, command, outMsg ) =
-                            Home.update { loggedIn = model.loggedIn, tasks = model.tasks } message m
+        ( HomeMsg message, Home pageModel ) ->
+            let
+                ( newModel, command, outMsg ) =
+                    Home.update { loggedIn = model.loggedIn, tasks = model.tasks } message pageModel
 
-                        c =
-                            case outMsg of
-                                Home.None ->
-                                    Cmd.none
+                c =
+                    case outMsg of
+                        Home.None ->
+                            Cmd.none
 
-                                Home.Sync ->
-                                    P.send <| P.Tasks model.tasks
-                    in
-                    ( { model | page = Home newModel }, Cmd.batch [ c, Cmd.map HomeMsg command ] )
+                        Home.Sync ->
+                            P.send <| P.Tasks model.tasks
+            in
+            ( { model | page = Home newModel }, Cmd.batch [ c, Cmd.map HomeMsg command ] )
 
-                _ ->
-                    ( model, Cmd.none )
+        ( HomeMsg _, _ ) ->
+            ( model, Cmd.none )
 
-        Logout ->
+        ( Logout, _ ) ->
             ( model
             , Http.post
                 { url = "/api/logout"
@@ -229,10 +223,10 @@ update msg model =
                 }
             )
 
-        LogoutResponse (Ok _) ->
+        ( LogoutResponse (Ok _), _ ) ->
             ( { model | loggedIn = False }, connectWebsocket False )
 
-        LogoutResponse (Err _) ->
+        ( LogoutResponse (Err _), _ ) ->
             -- Even if logout fails on server, still log out client-side
             ( { model | loggedIn = False }, connectWebsocket False )
 
@@ -313,8 +307,8 @@ content model =
         Home m ->
             Html.Styled.map HomeMsg <| Home.view m
 
-        New ->
-            Html.Styled.map NewTaskMsg <| Tasks.viewNewTask model.newTask
+        New m ->
+            Html.Styled.map NewTaskMsg <| NewTask.view m
 
         Login m ->
             Html.Styled.map LoginMsg <| Login.view m

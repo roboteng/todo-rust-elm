@@ -1,24 +1,19 @@
-module Tasks exposing (..)
+module Tasks exposing (Task, Tasks, allTasks, decodeTask, decodeTasks, empty, encodeTask, encodeTasks, newTask)
 
-import Html.Styled exposing (Html, form, input, main_, text)
-import Html.Styled.Attributes exposing (placeholder, type_, value)
-import Html.Styled.Events exposing (onInput, onSubmit)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 
 
-type alias NewTask =
+type alias Task =
     { summary : String
     }
 
 
-type alias Task =
-    { id : Int
-    , summary : String
-    }
+type Tasks
+    = Tasks Tasks_
 
 
-type alias Tasks =
+type alias Tasks_ =
     { tasks : List Task
     , nextId : Int
     }
@@ -26,37 +21,35 @@ type alias Tasks =
 
 empty : Tasks
 empty =
-    { tasks = [], nextId = 0 }
+    Tasks { tasks = [], nextId = 0 }
 
 
-newTask : Tasks -> NewTask -> Tasks
-newTask tasks task =
-    { tasks = { id = tasks.nextId, summary = task.summary } :: tasks.tasks
-    , nextId = tasks.nextId + 1
-    }
+newTask : Tasks -> Task -> Tasks
+newTask (Tasks tasks) task =
+    Tasks
+        { tasks = task :: tasks.tasks
+        , nextId = tasks.nextId + 1
+        }
+
+
+allTasks : Tasks -> List Task
+allTasks (Tasks tasks) =
+    tasks.tasks
 
 
 
 -- ENCODERS
 
 
-encodeNewTask : NewTask -> Value
-encodeNewTask task =
+encodeTask : Task -> Value
+encodeTask task =
     Encode.object
         [ ( "summary", Encode.string task.summary )
         ]
 
 
-encodeTask : Task -> Value
-encodeTask task =
-    Encode.object
-        [ ( "id", Encode.int task.id )
-        , ( "summary", Encode.string task.summary )
-        ]
-
-
 encodeTasks : Tasks -> Value
-encodeTasks tasks =
+encodeTasks (Tasks tasks) =
     Encode.object
         [ ( "tasks", Encode.list encodeTask tasks.tasks )
         , ( "next_id", Encode.int tasks.nextId )
@@ -67,61 +60,15 @@ encodeTasks tasks =
 -- DECODERS
 
 
-decodeNewTask : Decoder NewTask
-decodeNewTask =
-    Decode.map NewTask
-        (Decode.field "summary" Decode.string)
-
-
 decodeTask : Decoder Task
 decodeTask =
-    Decode.map2 Task
-        (Decode.field "id" Decode.int)
-        (Decode.field "summary" Decode.string)
+    Decode.map Task (Decode.field "summary" Decode.string)
 
 
 decodeTasks : Decoder Tasks
 decodeTasks =
-    Decode.map2 Tasks
-        (Decode.field "tasks" (Decode.list decodeTask))
-        (Decode.field "next_id" Decode.int)
-
-
-
--- New Tasks
-
-
-type Msg
-    = NewTaskSummary String
-    | Create
-
-
-type NewTaskCmd
-    = NewTaskCreated NewTask
-    | None
-
-
-type alias Model =
-    { summary : String
-    }
-
-
-update : Msg -> Model -> ( Model, NewTaskCmd )
-update msg model =
-    case msg of
-        NewTaskSummary summary ->
-            ( { model | summary = summary }, None )
-
-        Create ->
-            ( { model | summary = "" }, NewTaskCreated <| NewTask model.summary )
-
-
-viewNewTask : Model -> Html Msg
-viewNewTask model =
-    main_ []
-        [ form
-            [ onSubmit <| Create ]
-            [ input [ type_ "text", placeholder "Summary", onInput <| NewTaskSummary, value model.summary ] []
-            , input [ type_ "submit" ] [ text "Create" ]
-            ]
-        ]
+    Decode.map Tasks
+        (Decode.map2 Tasks_
+            (Decode.field "tasks" (Decode.list decodeTask))
+            (Decode.field "next_id" Decode.int)
+        )
