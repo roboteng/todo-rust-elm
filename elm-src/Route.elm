@@ -1,7 +1,8 @@
 module Route exposing (Route(..), encodeRoute, parseRoute)
 
+import Tasks
 import Url
-import Url.Parser exposing ((</>), Parser, map, oneOf, parse, s)
+import Url.Parser exposing ((</>), Parser, custom, map, oneOf, parse, s, string)
 
 
 type Route
@@ -9,6 +10,7 @@ type Route
     | New
     | Login
     | Register
+    | TaskDetails Tasks.TaskId
 
 
 parseRoute : Url.Url -> Route
@@ -23,6 +25,7 @@ routeParser =
         , map New (s "new")
         , map Login (s "login")
         , map Register (s "register")
+        , map TaskDetails (s "task" </> custom "taskId" Tasks.taskIdFromString)
         ]
 
 
@@ -40,3 +43,6 @@ encodeRoute route =
 
         Register ->
             "/register"
+
+        TaskDetails taskId ->
+            "/task/" ++ Tasks.taskIdToString taskId

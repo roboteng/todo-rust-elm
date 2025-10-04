@@ -1,6 +1,7 @@
 module Tasks exposing
     ( Task
     , TaskId
+    , TaskWithId
     , Tasks
     , allTasks
     , decodeTask
@@ -12,6 +13,8 @@ module Tasks exposing
     , encodeTasks
     , generateTaskId
     , newTask
+    , taskIdFromString
+    , taskIdToString
     )
 
 -- TaskId
@@ -41,12 +44,27 @@ generateTaskId =
     Random.int 1 0xFFFFFFFF |> Random.map TaskId
 
 
+taskIdToString : TaskId -> String
+taskIdToString (TaskId id) =
+    String.fromInt id
+
+
+taskIdFromString : String -> Maybe TaskId
+taskIdFromString val =
+    String.toInt val
+        |> Maybe.map TaskId
+
+
 
 {-
    Constraints on Tasks:
    - No two tasks can have the same Id
    - (TODO) Every task must exist on exactly one list
 -}
+
+
+type alias TaskWithId =
+    ( TaskId, Task )
 
 
 type alias Task =
@@ -79,9 +97,11 @@ newTask (Tasks tasks) (TaskId id) =
             Nothing
 
 
-allTasks : Tasks -> List Task
+allTasks : Tasks -> List TaskWithId
 allTasks (Tasks tasks) =
-    Dict.values tasks.tasks
+    Dict.toList tasks.tasks
+        |> List.map
+            (Tuple.mapFirst TaskId)
 
 
 

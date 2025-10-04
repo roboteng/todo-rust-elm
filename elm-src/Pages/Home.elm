@@ -19,6 +19,8 @@ import Html.Styled
 import Html.Styled.Attributes exposing (css, href)
 import Html.Styled.Events exposing (onClick)
 import Http
+import Json.Decode as Decode
+import Json.Encode as Encode
 import Route exposing (Route(..), parseRoute)
 import Tasks
 
@@ -30,7 +32,7 @@ type alias Context =
 type Model
     = M
         { loggedIn : Bool
-        , tasks : List Tasks.Task
+        , tasks : List Tasks.TaskWithId
         }
 
 
@@ -63,19 +65,20 @@ view (M model) =
     main_ [] <|
         if model.loggedIn then
             [ ul [ css [ listStyleType none ] ]
-                (List.map
-                    (\task -> li [] [ text task.summary ])
-                    model.tasks
-                )
+                (viewTasks model.tasks)
             , button [ onClick <| SyncTasksClicked ] [ text "Sync Tasks" ]
             , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
             ]
 
         else
             [ ul [ css [ listStyleType none ] ]
-                (List.map
-                    (\task -> li [] [ text task.summary ])
-                    model.tasks
-                )
+                (viewTasks model.tasks)
             , a [ href <| Route.encodeRoute Route.New ] [ text "Create new Item" ]
             ]
+
+
+viewTasks : List Tasks.TaskWithId -> List (Html Msg)
+viewTasks tasks =
+    List.map
+        (\task -> li [] [ a [ href <| Route.encodeRoute <| Route.TaskDetails (Tuple.first task) ] [ text <| (Tuple.second task |> .summary) ] ])
+        tasks

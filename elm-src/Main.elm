@@ -23,6 +23,7 @@ import Pages.Home as Home
 import Pages.Login as Login
 import Pages.NewTask as NewTask
 import Pages.Register as Register
+import Pages.TaskDetails as TaskDetails
 import Ports as P exposing (connectWebsocket)
 import Random
 import Route exposing (Route(..), parseRoute)
@@ -56,6 +57,7 @@ type Page
     | New NewTask.Model
     | Register Register.Model
     | Login Login.Model
+    | TaskDetails TaskDetails.Model
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -77,6 +79,9 @@ init _ url key =
 
                 Route.Login ->
                     Login <| Login.init
+
+                Route.TaskDetails id ->
+                    TaskDetails <| TaskDetails.init id
       , loggedIn = False
       }
     , P.connectWebsocket False
@@ -94,6 +99,7 @@ type Msg
     | RegisterMsg Register.Msg
     | LoginMsg Login.Msg
     | HomeMsg Home.Msg
+    | TaskDetailsMsg TaskDetails.Msg
     | Logout
     | LogoutResponse (Result Http.Error ())
     | TaskIdCreated Tasks.Task Tasks.TaskId
@@ -128,6 +134,9 @@ update msg model =
 
                         Route.Login ->
                             Login <| Login.init
+
+                        Route.TaskDetails taskId ->
+                            TaskDetails <| TaskDetails.init taskId
             in
             ( { model | page = page }
             , Cmd.none
@@ -214,6 +223,16 @@ update msg model =
             ( { model | page = Home newModel }, Cmd.batch [ c, Cmd.map HomeMsg command ] )
 
         ( HomeMsg _, _ ) ->
+            ( model, Cmd.none )
+
+        ( TaskDetailsMsg message, TaskDetails m ) ->
+            let
+                ( newModel, cmd ) =
+                    TaskDetails.update message m
+            in
+            ( { model | page = TaskDetails newModel }, Cmd.map TaskDetailsMsg cmd )
+
+        ( TaskDetailsMsg _, _ ) ->
             ( model, Cmd.none )
 
         ( Logout, _ ) ->
@@ -325,3 +344,6 @@ content model =
 
         Register m ->
             Html.Styled.map RegisterMsg <| Register.view m
+
+        TaskDetails m ->
+            Html.Styled.map TaskDetailsMsg <| TaskDetails.view m
