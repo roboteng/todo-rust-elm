@@ -1,7 +1,52 @@
-module Tasks exposing (Task, Tasks, allTasks, decodeTask, decodeTasks, empty, encodeTask, encodeTasks, newTask)
+module Tasks exposing
+    ( Task
+    , TaskId
+    , Tasks
+    , allTasks
+    , decodeTask
+    , decodeTaskId
+    , decodeTasks
+    , empty
+    , encodeTask
+    , encodeTaskId
+    , encodeTasks
+    , generateTaskId
+    , newTask
+    )
 
+-- TaskId
+
+import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
+import Random
+
+
+type TaskId
+    = TaskId Int
+
+
+decodeTaskId : Decode.Decoder TaskId
+decodeTaskId =
+    Decode.map TaskId Decode.int
+
+
+encodeTaskId : TaskId -> Encode.Value
+encodeTaskId (TaskId id) =
+    Encode.int id
+
+
+generateTaskId : Random.Generator TaskId
+generateTaskId =
+    Random.int 1 0xFFFFFFFF |> Random.map TaskId
+
+
+
+{-
+   Constraints on Tasks:
+   - No two tasks can have the same Id
+   - (TODO) Every task must exist on exactly one list
+-}
 
 
 type alias Task =
@@ -14,27 +59,29 @@ type Tasks
 
 
 type alias Tasks_ =
-    { tasks : List Task
-    , nextId : Int
+    { tasks : Dict Int Task
     }
 
 
 empty : Tasks
 empty =
-    Tasks { tasks = [], nextId = 0 }
+    Tasks { tasks = Dict.empty }
 
 
-newTask : Tasks -> Task -> Tasks
-newTask (Tasks tasks) task =
-    Tasks
-        { tasks = task :: tasks.tasks
-        , nextId = tasks.nextId + 1
-        }
+newTask : Tasks -> TaskId -> Maybe (Task -> Tasks)
+newTask (Tasks tasks) (TaskId id) =
+    case Dict.get id tasks.tasks of
+        Nothing ->
+            Just
+                (\nTask -> Tasks { tasks = Dict.insert id nTask tasks.tasks })
+
+        Just _ ->
+            Nothing
 
 
 allTasks : Tasks -> List Task
 allTasks (Tasks tasks) =
-    tasks.tasks
+    Dict.values tasks.tasks
 
 
 
@@ -51,8 +98,7 @@ encodeTask task =
 encodeTasks : Tasks -> Value
 encodeTasks (Tasks tasks) =
     Encode.object
-        [ ( "tasks", Encode.list encodeTask tasks.tasks )
-        , ( "next_id", Encode.int tasks.nextId )
+        [ ( "tasks", Encode.dict String.fromInt encodeTask tasks.tasks )
         ]
 
 
@@ -67,8 +113,40 @@ decodeTask =
 
 decodeTasks : Decoder Tasks
 decodeTasks =
-    Decode.map Tasks
-        (Decode.map2 Tasks_
-            (Decode.field "tasks" (Decode.list decodeTask))
-            (Decode.field "next_id" Decode.int)
-        )
+    Decode.map Tasks <|
+        Decode.map Tasks_ <|
+            Decode.andThen
+                (\maybeDict ->
+                    case maybeDict of
+                        Just dict ->
+                            Decode.succeed dict
+
+                        Nothing ->
+                            Decode.fail "Failed to decode tasks"
+                )
+            <|
+                Decode.map
+                    mapKeys
+                <|
+                    Decode.field "tasks" (Decode.dict decodeTask)
+
+
+mapKeys : Dict String Task -> Maybe (Dict Int Task)
+mapKeys tasks =
+    Dict.toList tasks
+        |> List.map
+            (\( k, v ) ->
+                String.toInt k |> Maybe.map (\key -> ( key, v ))
+            )
+        |> List.foldl
+            (\a ->
+                \b ->
+                    case ( a, b ) of
+                        ( Just c, Just d ) ->
+                            Just (c :: d)
+
+                        _ ->
+                            Nothing
+            )
+            (Just [])
+        |> Maybe.map Dict.fromList

@@ -24,6 +24,7 @@ import Pages.Login as Login
 import Pages.NewTask as NewTask
 import Pages.Register as Register
 import Ports as P exposing (connectWebsocket)
+import Random
 import Route exposing (Route(..), parseRoute)
 import Tasks
 import Url
@@ -95,6 +96,7 @@ type Msg
     | HomeMsg Home.Msg
     | Logout
     | LogoutResponse (Result Http.Error ())
+    | TaskIdCreated Tasks.Task Tasks.TaskId
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -146,7 +148,7 @@ update msg model =
                     ( { model | page = New newModel }, Cmd.none )
 
                 NewTask.NewTaskCreated task ->
-                    ( { model | page = New newModel, tasks = Tasks.newTask model.tasks task }, Cmd.none )
+                    ( { model | page = New newModel }, Random.generate (TaskIdCreated task) Tasks.generateTaskId )
 
         ( NewTaskMsg _, _ ) ->
             ( model, Cmd.none )
@@ -229,6 +231,14 @@ update msg model =
         ( LogoutResponse (Err _), _ ) ->
             -- Even if logout fails on server, still log out client-side
             ( { model | loggedIn = False }, connectWebsocket False )
+
+        ( TaskIdCreated task id, _ ) ->
+            case Tasks.newTask model.tasks id of
+                Just fn ->
+                    ( { model | tasks = fn task }, Cmd.none )
+
+                Nothing ->
+                    ( model, Random.generate (TaskIdCreated task) Tasks.generateTaskId )
 
 
 handleLoginMsg : Model -> Login.OutMsg -> ( Model, Cmd Msg )
