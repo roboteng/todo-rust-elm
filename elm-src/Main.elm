@@ -31,7 +31,7 @@ import Tasks
 import Url
 
 
-main : Program () Model Msg
+main : Program Int Model Msg
 main =
     Browser.application
         { init = init
@@ -49,6 +49,7 @@ type alias Model =
     , error : Maybe String
     , page : Page
     , loggedIn : Bool
+    , seed : Random.Seed
     }
 
 
@@ -60,8 +61,8 @@ type Page
     | TaskDetails TaskDetails.Model
 
 
-init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
-init _ url key =
+init : Int -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
+init seed url key =
     ( { pushUrl = \u -> Nav.pushUrl key u
       , tasks =
             Tasks.empty
@@ -83,6 +84,7 @@ init _ url key =
                 Route.TaskDetails id ->
                     TaskDetails <| TaskDetails.init id
       , loggedIn = False
+      , seed = Random.initialSeed seed
       }
     , P.connectWebsocket False
     )
@@ -102,7 +104,6 @@ type Msg
     | TaskDetailsMsg TaskDetails.Msg
     | Logout
     | LogoutResponse (Result Http.Error ())
-    | TaskIdCreated Tasks.Task Tasks.TaskId
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -157,7 +158,17 @@ update msg model =
                     ( { model | page = New newModel }, Cmd.none )
 
                 NewTask.NewTaskCreated task ->
-                    ( { model | page = New newModel }, Random.generate (TaskIdCreated task) Tasks.generateTaskId )
+                    let
+                        ( tasks, seed ) =
+                            Tasks.newTask model.tasks model.seed task
+                    in
+                    ( { model
+                        | page = New newModel
+                        , tasks = tasks
+                        , seed = seed
+                      }
+                    , Cmd.none
+                    )
 
         ( NewTaskMsg _, _ ) ->
             ( model, Cmd.none )
@@ -250,14 +261,6 @@ update msg model =
         ( LogoutResponse (Err _), _ ) ->
             -- Even if logout fails on server, still log out client-side
             ( { model | loggedIn = False }, connectWebsocket False )
-
-        ( TaskIdCreated task id, _ ) ->
-            case Tasks.newTask model.tasks id of
-                Just fn ->
-                    ( { model | tasks = fn task }, Cmd.none )
-
-                Nothing ->
-                    ( model, Random.generate (TaskIdCreated task) Tasks.generateTaskId )
 
 
 handleLoginMsg : Model -> Login.OutMsg -> ( Model, Cmd Msg )

@@ -17,6 +17,7 @@
             var socket;
             var app = Elm.Main.init({
                 node: document.getElementById("app"),
+                flags: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
             });
             app.ports.sendMessage.subscribe((msg) => {
                 console.log(`sending ${typeof msg}`, msg);

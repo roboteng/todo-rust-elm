@@ -17,12 +17,14 @@ module Tasks exposing
     , taskIdToString
     )
 
--- TaskId
-
 import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 import Random
+
+
+
+-- TaskId
 
 
 type TaskId
@@ -39,9 +41,9 @@ encodeTaskId (TaskId id) =
     Encode.int id
 
 
-generateTaskId : Random.Generator TaskId
-generateTaskId =
-    Random.int 1 0xFFFFFFFF |> Random.map TaskId
+generateTaskId : Random.Seed -> ( TaskId, Random.Seed )
+generateTaskId seed =
+    Random.step (Random.int 1 0xFFFFFFFF) seed |> Tuple.mapFirst TaskId
 
 
 taskIdToString : TaskId -> String
@@ -86,15 +88,18 @@ empty =
     Tasks { tasks = Dict.empty }
 
 
-newTask : Tasks -> TaskId -> Maybe (Task -> Tasks)
-newTask (Tasks tasks) (TaskId id) =
+newTask : Tasks -> Random.Seed -> Task -> ( Tasks, Random.Seed )
+newTask (Tasks tasks) seed task =
+    let
+        ( TaskId id, newSeed ) =
+            generateTaskId seed
+    in
     case Dict.get id tasks.tasks of
         Nothing ->
-            Just
-                (\nTask -> Tasks { tasks = Dict.insert id nTask tasks.tasks })
+            ( Tasks { tasks = Dict.insert id task tasks.tasks }, newSeed )
 
         Just _ ->
-            Nothing
+            newTask (Tasks tasks) newSeed task
 
 
 allTasks : Tasks -> List TaskWithId

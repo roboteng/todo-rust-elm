@@ -3,8 +3,14 @@ module PortsTest exposing (..)
 import Expect
 import Json.Encode as Encode
 import Ports exposing (InMessage(..), decodeIncomingMessage)
+import Random
 import Tasks as T
 import Test exposing (..)
+
+
+id : T.TaskId
+id =
+    T.generateTaskId (Random.initialSeed 0) |> Tuple.first
 
 
 suite : Test
@@ -14,10 +20,8 @@ suite =
             [ test "successfully decodes a new_tasks message" <|
                 \_ ->
                     let
-                        expectedTasks =
-                            { tasks = [ { id = 1, summary = "Hello World" } ]
-                            , nextId = 2
-                            }
+                        ( expectedTasks, _ ) =
+                            T.newTask T.empty (Random.initialSeed 1) { summary = "Test Task" }
 
                         json =
                             Encode.object

@@ -3,19 +3,21 @@ module TasksTest exposing (..)
 import Expect
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Random
 import Tasks exposing (..)
 import Test exposing (..)
+
 
 
 -- Helper function for round-trip testing
 
 
-roundTripNewTask : NewTask -> Result Decode.Error NewTask
+roundTripNewTask : Task -> Result Decode.Error Task
 roundTripNewTask newTask =
     newTask
-        |> encodeNewTask
+        |> encodeTask
         |> Encode.encode 0
-        |> Decode.decodeString decodeNewTask
+        |> Decode.decodeString decodeTask
 
 
 roundTripTask : Task -> Result Decode.Error Task
@@ -32,6 +34,7 @@ roundTripTasks tasks =
         |> encodeTasks
         |> Encode.encode 0
         |> Decode.decodeString decodeTasks
+
 
 
 -- Tests
@@ -67,8 +70,7 @@ suite =
                 \_ ->
                     let
                         original =
-                            { id = 42
-                            , summary = "Complete project"
+                            { summary = "Complete project"
                             }
 
                         result =
@@ -79,8 +81,7 @@ suite =
                 \_ ->
                     let
                         original =
-                            { id = 0
-                            , summary = ""
+                            { summary = ""
                             }
 
                         result =
@@ -93,13 +94,14 @@ suite =
                 \_ ->
                     let
                         original =
-                            { tasks =
-                                [ { id = 1, summary = "First task" }
-                                , { id = 5, summary = "Second task with different id" }
-                                , { id = 100, summary = "Task with high id" }
+                            List.foldl
+                                (\task ( tasks, seed ) -> newTask tasks seed task)
+                                ( empty, Random.initialSeed 2 )
+                                [ { summary = "First task" }
+                                , { summary = "Second task with different id" }
+                                , { summary = "Task with high id" }
                                 ]
-                            , nextId = 101
-                            }
+                                |> Tuple.first
 
                         result =
                             roundTripTasks original
@@ -109,9 +111,7 @@ suite =
                 \_ ->
                     let
                         original =
-                            { tasks = []
-                            , nextId = 0
-                            }
+                            empty
 
                         result =
                             roundTripTasks original
