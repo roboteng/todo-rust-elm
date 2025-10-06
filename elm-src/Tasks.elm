@@ -11,6 +11,7 @@ module Tasks exposing
     , encodeTask
     , encodeTaskId
     , encodeTasks
+    , find
     , generateTaskId
     , newTask
     , taskIdFromString
@@ -107,6 +108,11 @@ allTasks (Tasks tasks) =
     Dict.toList tasks.tasks
         |> List.map
             (Tuple.mapFirst TaskId)
+
+
+find : Tasks -> TaskId -> Maybe Task
+find (Tasks tasks) (TaskId id) =
+    Dict.get id tasks.tasks
 
 
 

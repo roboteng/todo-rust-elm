@@ -82,7 +82,7 @@ init seed url key =
                     Login <| Login.init
 
                 Route.TaskDetails id ->
-                    TaskDetails <| TaskDetails.init id
+                    TaskDetails <| TaskDetails.init Tasks.empty id
       , loggedIn = False
       , seed = Random.initialSeed seed
       }
@@ -137,7 +137,7 @@ update msg model =
                             Login <| Login.init
 
                         Route.TaskDetails taskId ->
-                            TaskDetails <| TaskDetails.init taskId
+                            TaskDetails <| TaskDetails.init model.tasks taskId
             in
             ( { model | page = page }
             , Cmd.none
@@ -239,7 +239,7 @@ update msg model =
         ( TaskDetailsMsg message, TaskDetails m ) ->
             let
                 ( newModel, cmd ) =
-                    TaskDetails.update message m
+                    TaskDetails.update { tasks = model.tasks } message m
             in
             ( { model | page = TaskDetails newModel }, Cmd.map TaskDetailsMsg cmd )
 
