@@ -15,7 +15,13 @@ type Route
 
 parseRoute : Url.Url -> Route
 parseRoute url =
-    parse routeParser url |> Maybe.withDefault Home
+    parse
+        routeParser
+        { url
+            | path = url.fragment |> Maybe.withDefault ""
+            , fragment = Nothing
+        }
+        |> Maybe.withDefault Home
 
 
 routeParser : Parser (Route -> a) a
@@ -33,16 +39,22 @@ encodeRoute : Route -> String
 encodeRoute route =
     case route of
         Home ->
-            "/"
+            encode [ "" ]
 
         New ->
-            "/new"
+            encode [ "new" ]
 
         Login ->
-            "/login"
+            encode [ "login" ]
 
         Register ->
-            "/register"
+            encode [ "register" ]
 
         TaskDetails taskId ->
-            "/task/" ++ Tasks.taskIdToString taskId
+            encode [ "task", Tasks.taskIdToString taskId ]
+
+
+encode : List String -> String
+encode segments =
+    ("/#" :: segments)
+        |> String.join "/"

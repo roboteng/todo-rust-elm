@@ -89,9 +89,8 @@ pub async fn run_app(env: Env) {
 
 fn make_app(assets_dir: PathBuf, app_state: AppState) -> Router {
     Router::new()
-        .fallback_service(
-            ServeDir::new(&assets_dir).fallback(ServeFile::new(assets_dir.join("index.html"))),
-        )
+        .route("/", axum::routing::get_service(ServeFile::new(assets_dir.join("index.html"))))
+        .fallback_service(ServeDir::new(&assets_dir))
         .route("/ws", any(ws_handler))
         .route("/api/register", post(handle_register))
         .route("/api/login", post(handle_login))

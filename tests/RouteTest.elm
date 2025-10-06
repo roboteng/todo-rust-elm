@@ -6,21 +6,23 @@ import Test exposing (..)
 import Url
 
 
--- Helper function to create a test URL from a path
-
-
 createUrl : String -> Url.Url
-createUrl path =
+createUrl encodedRoute =
     { protocol = Url.Http
     , host = "example.com"
     , port_ = Nothing
-    , path = path
+    , path = "/"
     , query = Nothing
-    , fragment = Nothing
+    , fragment =
+        Just
+            (case String.toList encodedRoute of
+                '/' :: '#' :: rest ->
+                    String.fromList rest
+
+                _ ->
+                    encodedRoute
+            )
     }
-
-
--- Round-trip test helper: parse a URL path, then encode it back
 
 
 roundTripUrl : String -> String
@@ -29,6 +31,7 @@ roundTripUrl path =
         |> createUrl
         |> parseRoute
         |> encodeRoute
+
 
 
 -- Tests
@@ -41,31 +44,31 @@ suite =
             [ test "Home route round-trip" <|
                 \_ ->
                     roundTripUrl "/"
-                        |> Expect.equal "/"
+                        |> Expect.equal "/#/"
             , test "Home route with empty path round-trip" <|
                 \_ ->
                     roundTripUrl ""
-                        |> Expect.equal "/"
+                        |> Expect.equal "/#/"
             , test "New route round-trip" <|
                 \_ ->
                     roundTripUrl "/new"
-                        |> Expect.equal "/new"
+                        |> Expect.equal "/#/new"
             , test "Login route round-trip" <|
                 \_ ->
                     roundTripUrl "/login"
-                        |> Expect.equal "/login"
+                        |> Expect.equal "/#/login"
             , test "Register route round-trip" <|
                 \_ ->
                     roundTripUrl "/register"
-                        |> Expect.equal "/register"
+                        |> Expect.equal "/#/register"
             , test "Unknown route defaults to Home in round-trip" <|
                 \_ ->
                     roundTripUrl "/unknown"
-                        |> Expect.equal "/"
+                        |> Expect.equal "/#/"
             , test "Route with trailing slash normalizes to Home" <|
                 \_ ->
                     roundTripUrl "//"
-                        |> Expect.equal "/"
+                        |> Expect.equal "/#/"
             , test "Route with query parameters defaults to Home" <|
                 \_ ->
                     let
@@ -81,7 +84,7 @@ suite =
                     urlWithQuery
                         |> parseRoute
                         |> encodeRoute
-                        |> Expect.equal "/"
+                        |> Expect.equal "/#/"
             ]
         , describe "Route type round-trip tests"
             [ test "Home route encode/parse consistency" <|
